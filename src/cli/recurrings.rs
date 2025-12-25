@@ -150,6 +150,29 @@ pub(super) fn run_recurrings(
             }
 
             let mut input = serde_json::Map::new();
+            if let Some(name) = args.name.as_ref() {
+                input.insert("name".to_string(), serde_json::Value::String(name.clone()));
+            }
+            if let Some(emoji) = args.emoji.as_ref() {
+                input.insert(
+                    "emoji".to_string(),
+                    serde_json::Value::String(emoji.clone()),
+                );
+            }
+
+            if args.clear_category {
+                input.insert("categoryId".to_string(), serde_json::Value::Null);
+            } else if let Some(cid) = super::resolve_category_id(
+                client,
+                args.category_id.as_ref(),
+                args.category.as_deref(),
+            )? {
+                input.insert(
+                    "categoryId".to_string(),
+                    serde_json::Value::String(cid.as_str().to_string()),
+                );
+            }
+
             if args.recalculate_only_for_future {
                 input.insert(
                     "recalculateOnlyForFuture".to_string(),

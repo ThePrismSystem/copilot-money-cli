@@ -546,6 +546,26 @@ pub struct RecurringsCreateArgs {
 pub struct RecurringsEditArgs {
     pub id: RecurringId,
 
+    /// Update the recurring name.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Set the category by name (exact match, case-insensitive).
+    #[arg(long)]
+    pub category: Option<String>,
+
+    /// Set the category by id.
+    #[arg(long)]
+    pub category_id: Option<CategoryId>,
+
+    /// Clear any category assignment.
+    #[arg(long, default_value_t = false)]
+    pub clear_category: bool,
+
+    /// Set the recurring emoji (best-effort; Copilot may ignore invalid values).
+    #[arg(long)]
+    pub emoji: Option<String>,
+
     #[arg(long)]
     pub name_contains: Option<String>,
 
