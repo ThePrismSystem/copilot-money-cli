@@ -174,12 +174,20 @@ impl CopilotClient {
         ids: Vec<TransactionIdRef>,
         is_reviewed: bool,
     ) -> anyhow::Result<BulkEditTransactionsResult> {
+        self.bulk_edit_transactions(ids, json!({ "isReviewed": is_reviewed }))
+    }
+
+    pub fn bulk_edit_transactions(
+        &self,
+        ids: Vec<TransactionIdRef>,
+        input: Value,
+    ) -> anyhow::Result<BulkEditTransactionsResult> {
         let data = self.graphql(
             "BulkEditTransactions",
             ops::BULK_EDIT_TRANSACTIONS,
             json!({
                 "filter": { "ids": ids },
-                "input": { "isReviewed": is_reviewed }
+                "input": input
             }),
         )?;
 
