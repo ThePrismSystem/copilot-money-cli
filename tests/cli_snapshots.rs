@@ -12,6 +12,18 @@ fn run(args: &[&str]) -> String {
     String::from_utf8(out).unwrap()
 }
 
+fn run_fail(args: &[&str]) -> String {
+    let tmp_home = tempfile::tempdir().unwrap();
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("copilot"));
+    cmd.env("HOME", tmp_home.path());
+    cmd.env_remove("COPILOT_TOKEN");
+    cmd.env_remove("COPILOT_TOKEN_FILE");
+    cmd.env("COPILOT_FIXTURES_DIR", "tests/fixtures/graphql");
+    cmd.args(args);
+    let out = cmd.assert().failure().get_output().stderr.clone();
+    String::from_utf8(out).unwrap()
+}
+
 #[test]
 fn transactions_list_table_snapshot() {
     insta::assert_snapshot!(run(&["transactions", "list"]));
@@ -159,6 +171,16 @@ fn transactions_assign_recurring_table_snapshot() {
         "txn_1",
         "--recurring-id",
         "rec_1",
+    ]));
+}
+
+#[test]
+fn transactions_clear_recurring_table_snapshot() {
+    insta::assert_snapshot!(run_fail(&[
+        "--yes",
+        "transactions",
+        "clear-recurring",
+        "txn_1"
     ]));
 }
 

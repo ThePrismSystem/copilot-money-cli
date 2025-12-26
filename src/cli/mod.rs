@@ -179,6 +179,7 @@ pub enum TransactionsCmd {
     Unreview(TransactionsReviewArgs),
     SetCategory(TransactionsSetCategoryArgs),
     AssignRecurring(TransactionsAssignRecurringArgs),
+    ClearRecurring(TransactionsClearRecurringArgs),
     SetNotes(TransactionsSetNotesArgs),
     SetTags(TransactionsSetTagsArgs),
     Edit(TransactionsEditArgs),
@@ -374,6 +375,11 @@ pub struct TransactionsAssignRecurringArgs {
 
     #[arg(long)]
     pub recurring_id: RecurringId,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct TransactionsClearRecurringArgs {
+    pub ids: Vec<TransactionId>,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -977,6 +983,18 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                 updated.push(t);
             }
             render_transactions_updated(cli, updated)
+        }
+        TransactionsCmd::ClearRecurring(args) => {
+            if cli.dry_run {
+                println!("dry-run: would clear recurring for {:?}", args.ids);
+                return Ok(());
+            }
+            // Copilot’s web GraphQL API does not allow clearing recurring via EditTransaction or
+            // BulkEditTransactions (both reject `recurringId` in the input). We only implement
+            // assignment via `addTransactionToRecurring` for now.
+            anyhow::bail!(
+                "clearing recurring is not supported by Copilot’s web GraphQL API (no known mutation); please clear it in the Copilot app for now"
+            )
         }
         TransactionsCmd::SetNotes(args) => {
             if cli.dry_run {

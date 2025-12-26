@@ -1,0 +1,6 @@
+---
+source: tests/cli_snapshots.rs
+assertion_line: 179
+expression: "run_fail(&[\"--yes\", \"transactions\", \"clear-recurring\", \"txn_1\"])"
+---
+Error: clearing recurring is not supported by Copilot’s web GraphQL API (no known mutation); please clear it in the Copilot app for now
