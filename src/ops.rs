@@ -29,6 +29,10 @@ pub const ADD_TRANSACTION_TO_RECURRING: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/graphql/AddTransactionToRecurring.graphql"
 ));
+pub const EXCLUDE_TRANSACTION_FROM_RECURRING: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/graphql/ExcludeTransactionFromRecurring.graphql"
+));
 pub const CREATE_TAG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/graphql/CreateTag.graphql"

@@ -12,7 +12,8 @@
             "itemId": "item_1",
             "accountId": "acct_1",
             "isReviewed": false,
-            "categoryId": "cat_other"
+            "categoryId": "cat_other",
+            "recurringId": "rec_1"
           }
         },
         {

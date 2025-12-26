@@ -277,6 +277,36 @@ impl CopilotClient {
         Ok(serde_json::from_value(txn)?)
     }
 
+    pub fn exclude_transaction_from_recurring(
+        &self,
+        item_id: &ItemId,
+        account_id: &AccountId,
+        id: &TransactionId,
+        recurring_id: &RecurringId,
+    ) -> anyhow::Result<Transaction> {
+        let data = self.graphql(
+            "ExcludeTransactionFromRecurring",
+            ops::EXCLUDE_TRANSACTION_FROM_RECURRING,
+            json!({
+                "itemId": item_id.as_str(),
+                "accountId": account_id.as_str(),
+                "id": id.as_str(),
+                "input": {
+                    "recurringId": recurring_id.as_str(),
+                    "isExcluded": true
+                }
+            }),
+        )?;
+
+        let txn = data
+            .pointer("/data/addTransactionToRecurring/transaction")
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("unexpected ExcludeTransactionFromRecurring response shape")
+            })?;
+        Ok(serde_json::from_value(txn)?)
+    }
+
     pub fn delete_tag(&self, id: &TagId) -> anyhow::Result<bool> {
         let data = self.graphql(
             "DeleteTag",

@@ -1,5 +1,6 @@
 ---
 source: tests/cli_snapshots.rs
+assertion_line: 32
 expression: "run(&[\"--output\", \"json\", \"transactions\", \"list\", \"--page-info\"])"
 ---
 {
@@ -14,7 +15,7 @@ expression: "run(&[\"--output\", \"json\", \"transactions\", \"list\", \"--page-
       "isReviewed": false,
       "categoryId": "cat_other",
       "accountId": "acct_1",
-      "recurringId": null,
+      "recurringId": "rec_1",
       "userNotes": null,
       "tags": null
     },
