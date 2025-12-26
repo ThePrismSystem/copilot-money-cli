@@ -2,7 +2,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use copilot_money_cli::client::{ClientMode, CopilotClient};
+use copilot_money_cli::client::{ClientMode, CopilotClient, TransactionIdRef};
+use copilot_money_cli::types::{AccountId, ItemId, TransactionId};
 
 fn serve_one(status: u16, body: &'static str, assert_bearer: Option<&'static str>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -50,6 +51,71 @@ fn serve_one(status: u16, body: &'static str, assert_bearer: Option<&'static str
         }
         let req_body = String::from_utf8_lossy(&body_buf[..content_length]).to_string();
         assert!(req_body.contains("\"operationName\":\"User\""));
+
+        let resp = format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(resp.as_bytes()).unwrap();
+    });
+
+    format!("http://{}", addr)
+}
+
+fn serve_one_with_body_assert(
+    status: u16,
+    body: &'static str,
+    assert_bearer: Option<&'static str>,
+    assert_contains: &'static [&'static str],
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+
+        let mut buf = Vec::new();
+        let mut header_end = None;
+        while header_end.is_none() {
+            let mut tmp = [0u8; 1024];
+            let n = stream.read(&mut tmp).unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                header_end = Some(i + 4);
+            }
+        }
+
+        let header_end = header_end.expect("did not receive full headers");
+        let headers = String::from_utf8_lossy(&buf[..header_end]).to_string();
+        let lower = headers.to_lowercase();
+        assert!(lower.starts_with("post /api/graphql"));
+        if let Some(t) = assert_bearer {
+            assert!(lower.contains(&format!("authorization: bearer {t}")));
+        }
+
+        let content_length = lower
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length: "))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+
+        let mut body_buf = buf[header_end..].to_vec();
+        while body_buf.len() < content_length {
+            let mut tmp = vec![0u8; content_length - body_buf.len()];
+            let n = stream.read(&mut tmp).unwrap();
+            if n == 0 {
+                break;
+            }
+            body_buf.extend_from_slice(&tmp[..n]);
+        }
+        let req_body = String::from_utf8_lossy(&body_buf[..content_length]).to_string();
+        for needle in assert_contains {
+            assert!(req_body.contains(needle), "missing needle: {needle}");
+        }
 
         let resp = format!(
             "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
@@ -224,4 +290,35 @@ fn http_mode_refreshes_token_on_unauthenticated_and_retries_once() {
     assert_eq!(saved.trim(), "refreshed_token");
 
     unsafe { std::env::remove_var("COPILOT_TEST_REFRESH_TOKEN") };
+}
+
+#[test]
+fn http_mode_bulk_edit_sends_arbitrary_input() {
+    let base_url = serve_one_with_body_assert(
+        200,
+        r#"{"data":{"bulkEditTransactions":{"updated":[],"failed":[]}}}"#,
+        Some("abc"),
+        &[
+            "\"operationName\":\"BulkEditTransactions\"",
+            "\"input\":{\"recurringId\":null}",
+        ],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let client = CopilotClient::new(ClientMode::Http {
+        base_url,
+        token: Some("abc".to_string()),
+        token_file: tmp.path().join("token"),
+        session_dir: None,
+    });
+
+    client
+        .bulk_edit_transactions(
+            vec![TransactionIdRef {
+                item_id: ItemId::from("item_1"),
+                account_id: AccountId::from("acct_1"),
+                id: TransactionId::from("txn_1"),
+            }],
+            serde_json::json!({ "recurringId": serde_json::Value::Null }),
+        )
+        .unwrap();
 }
