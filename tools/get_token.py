@@ -3,32 +3,262 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import html
+import json
+import os
+import re
+import shutil
 import sys
+import tempfile
 import time
+from base64 import urlsafe_b64decode
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 
-def load_creds(path: Path) -> tuple[str, str]:
-    email = None
-    password = None
+def trace(message: str) -> None:
+    if os.environ.get("COPILOT_DEBUG_GET_TOKEN") == "1":
+        print(f"[get_token] {message}", file=sys.stderr, flush=True)
+
+
+def _reexec_into_integrations_venv_if_needed() -> None:
+    if os.environ.get("CODEX_INTEGRATIONS_VENV_REEXEC") == "1":
+        return
+    try:
+        import googleapiclient  # noqa: F401
+
+        return
+    except Exception:
+        pass
+
+    venv_py = Path.home() / ".codex" / "integrations" / "venv" / "bin" / "python"
+    if not venv_py.exists():
+        return
+    os.environ["CODEX_INTEGRATIONS_VENV_REEXEC"] = "1"
+    os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+def load_secret_fields(path: Path) -> dict[str, str]:
+    fields: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        if "=" not in line:
+        key, value = line.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            fields[key] = value
+    return fields
+
+
+def infer_email(explicit_email: str | None, secrets_file: Path) -> str | None:
+    if explicit_email and explicit_email.strip():
+        return explicit_email.strip()
+    try:
+        return load_secret_fields(secrets_file).get("email")
+    except Exception:
+        return None
+
+
+
+
+def _reexec_under_xvfb_if_needed(mode: str, headful: bool) -> None:
+    if mode not in {"email-link", "credentials", "session"}:
+        return
+    if os.environ.get("COPILOT_XVFB_REEXEC") == "1":
+        return
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        return
+    xvfb_run = shutil.which("xvfb-run")
+    if not xvfb_run:
+        return
+
+    argv = [xvfb_run, "-a", sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+    if not headful and "--headful" not in sys.argv[1:]:
+        argv.append("--headful")
+    os.environ["COPILOT_XVFB_REEXEC"] = "1"
+    os.execvp(argv[0], argv)
+
+
+
+
+
+
+def decode_jwt_payload(token: str) -> dict | None:
+    parts = token.strip().split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1]
+    payload += "=" * ((4 - (len(payload) % 4)) % 4)
+    try:
+        raw = urlsafe_b64decode(payload.encode("utf-8"))
+        obj = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def token_is_fresh(token: str, *, grace_seconds: int = 60) -> bool:
+    payload = decode_jwt_payload(token)
+    if not payload:
+        return False
+    exp = payload.get("exp")
+    if not isinstance(exp, int | float):
+        return False
+    return float(exp) > (time.time() + float(grace_seconds))
+
+
+def _cleanup_stale_singleton_artifacts(session_dir: Path) -> bool:
+    removed_any = False
+    for name in ("SingletonCookie", "SingletonLock", "SingletonSocket"):
+        path = session_dir / name
+        try:
+            if path.is_symlink() or path.exists():
+                path.unlink()
+                removed_any = True
+                trace(f"removed stale Chromium singleton artifact {path}")
+        except FileNotFoundError:
             continue
-        k, v = line.split("=", 1)
-        k = k.strip().lower()
-        v = v.strip()
-        if k == "email":
-            email = v
-        elif k == "password":
-            password = v
-    if not email or not password:
-        raise SystemExit(f"Missing email/password in {path}")
-    return email, password
+    default_lock = session_dir / "Default" / "LOCK"
+    try:
+        if default_lock.exists():
+            default_lock.unlink()
+            removed_any = True
+            trace(f"removed stale Chromium lock file {default_lock}")
+    except FileNotFoundError:
+        pass
+    return removed_any
+
+
+def launch_browser_context(playwright, *, user_data_dir: str | None, headful: bool):
+    def launch(dir_value: str | None):
+        if dir_value:
+            trace(f"launching persistent browser session dir={dir_value}")
+            return playwright.chromium.launch_persistent_context(
+                dir_value,
+                headless=not headful,
+                viewport={"width": 1280, "height": 720},
+            )
+        trace("launching ephemeral browser")
+        browser = playwright.chromium.launch(headless=not headful)
+        return browser.new_context(viewport={"width": 1280, "height": 720})
+
+    try:
+        return launch(user_data_dir)
+    except Exception as exc:
+        if not user_data_dir:
+            raise
+        session_dir = Path(user_data_dir)
+        if not session_dir.exists():
+            raise
+        message = str(exc)
+        if ("ProcessSingleton" in message or "profile is already in use" in message) and _cleanup_stale_singleton_artifacts(session_dir):
+            trace("retrying persistent browser session after removing stale singleton artifacts")
+            return launch(str(session_dir))
+        backup = session_dir.with_name(f"{session_dir.name}.broken-{int(time.time())}")
+        trace(f"persistent session launch failed; moving {session_dir} to {backup}")
+        session_dir.rename(backup)
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return launch(str(session_dir))
+
+
+def prepare_user_data_dir(
+    mode: str, user_data_dir: str | None
+) -> tuple[str | None, tempfile.TemporaryDirectory[str] | None]:
+    if user_data_dir:
+        return user_data_dir, None
+    if mode not in {"email-link", "credentials"}:
+        return None, None
+    temp_dir = tempfile.TemporaryDirectory(prefix="copilot-money-cli-")
+    trace(f"using temporary persistent profile dir={temp_dir.name}")
+    return temp_dir.name, temp_dir
+
+
+def _gmail_service():
+    _reexec_into_integrations_venv_if_needed()
+    sys.path.insert(0, str(Path.home() / ".codex" / "integrations"))
+    from mailcal.google.gmail import build_service  # type: ignore
+
+    return build_service()
+
+
+def extract_links(message: dict) -> list[str]:
+    def iter_parts(part: dict):
+        children = part.get("parts") or []
+        if children:
+            for child in children:
+                yield from iter_parts(child)
+        else:
+            yield part
+
+    def decode(part: dict) -> str:
+        data = (part.get("body") or {}).get("data")
+        if not data:
+            return ""
+        raw = urlsafe_b64decode(data + "==")
+        return raw.decode("utf-8", errors="ignore")
+
+    payload = message.get("payload") or {}
+    candidates: list[str] = []
+    for part in iter_parts(payload):
+        mime = str(part.get("mimeType") or "").lower()
+        if mime not in ("text/html", "text/plain"):
+            continue
+        text = decode(part)
+        if not text:
+            continue
+        for url in re.findall(r'''href=["'](https?://[^"']+)["']''', text, flags=re.I):
+            url = html.unescape(url).strip().strip('"\'')
+            if "copilot" in url or "/__/auth/action" in url:
+                candidates.append(url)
+        for url in re.findall(r'''https?://[^\s"<>)]{10,}''', text):
+            url = html.unescape(url).strip().strip('"\'')
+            if "copilot" in url or "/__/auth/action" in url:
+                candidates.append(url)
+
+    firebase = [url for url in candidates if "/__/auth/action" in url and "oobCode=" in url]
+    if firebase:
+        return sorted(set(firebase), key=len, reverse=True)
+
+    app_links = [url for url in candidates if url.startswith("https://app.copilot.money")]
+    return sorted(set(app_links), key=len, reverse=True)
+
+
+def wait_for_magic_link(*, timeout_seconds: int, email: str | None) -> str:
+    trace("connecting to Gmail API")
+    service = _gmail_service()
+    start_ms = int(time.time() * 1000) - max(300_000, int(timeout_seconds) * 1_000)
+    deadline = time.time() + max(5, int(timeout_seconds))
+    last_seen = None
+    sender_query = "from:(noreply-copilotmoney@copilot.money OR no-reply@copilot.money OR team@copilot.money)"
+    target_query = f"to:{email} " if email else ""
+    query = f"newer_than:1d {target_query}{sender_query}".strip()
+    while time.time() < deadline:
+        resp = (
+            service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=5, includeSpamTrash=False)
+            .execute()
+        )
+        ids = [msg.get("id") for msg in (resp.get("messages") or []) if msg.get("id")]
+        for message_id in ids:
+            message = (
+                service.users()
+                .messages()
+                .get(userId="me", id=message_id, format="full")
+                .execute()
+            )
+            internal_ms = int(message.get("internalDate") or 0)
+            if internal_ms < start_ms:
+                continue
+            links = extract_links(message)
+            if links:
+                return links[0]
+            last_seen = (message_id, internal_ms)
+        time.sleep(3)
+    raise SystemExit(f"failed to find a fresh Copilot login email (last_seen={last_seen})")
 
 
 def main() -> int:
@@ -48,7 +278,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--email",
-        help="Email address (required for --mode=email-link unless it can be inferred from --secrets-file).",
+        help="Email address (required for non-interactive login unless it can be inferred from --secrets-file).",
     )
     parser.add_argument(
         "--headful",
@@ -68,42 +298,32 @@ def main() -> int:
     args = parser.parse_args()
 
     mode = str(args.mode)
+    if mode in {"email-link", "credentials", "session"}:
+        _reexec_into_integrations_venv_if_needed()
     interactive = mode == "interactive"
     email_link = mode == "email-link"
     credentials_mode = mode == "credentials"
     session_mode = mode == "session"
     headful = bool(args.headful) or interactive
+    secrets_file = Path(args.secrets_file).expanduser()
+    email = infer_email(args.email, secrets_file)
+    user_data_dir, temp_profile = prepare_user_data_dir(mode, args.user_data_dir)
 
-    email = password = None
-    if credentials_mode:
-        email, password = load_creds(Path(args.secrets_file).expanduser())
-    elif email_link:
-        if args.email:
-            email = args.email.strip()
-        else:
-            # Try to infer from secrets file (without requiring password use).
-            try:
-                inferred_email, _ = load_creds(Path(args.secrets_file).expanduser())
-                email = inferred_email
-            except Exception:
-                email = None
-        if not email:
-            print("--email is required for --mode=email-link", file=sys.stderr)
-            return 2
+    if (credentials_mode or email_link) and not email:
+        print("--email is required (or must be inferable from --secrets-file)", file=sys.stderr)
+        return 2
 
     token: str | None = None
 
+    _reexec_under_xvfb_if_needed(mode, headful)
+    trace(f"starting mode={mode}")
     with sync_playwright() as p:
-        if args.user_data_dir:
-            context = p.chromium.launch_persistent_context(
-                args.user_data_dir,
-                headless=not headful,
-                viewport={"width": 1280, "height": 720},
-            )
-            page = context.new_page()
-        else:
-            browser = p.chromium.launch(headless=not headful)
-            page = browser.new_page(viewport={"width": 1280, "height": 720})
+        context = launch_browser_context(
+            p,
+            user_data_dir=user_data_dir,
+            headful=headful,
+        )
+        page = context.new_page()
 
         def on_request(req) -> None:
             nonlocal token
@@ -114,7 +334,6 @@ def main() -> int:
             auth = req.headers.get("authorization")
             if not auth:
                 return
-            # Expect "Bearer <jwt>"
             parts = auth.split(" ", 1)
             if len(parts) == 2 and parts[0].lower() == "bearer":
                 token = parts[1].strip()
@@ -122,8 +341,7 @@ def main() -> int:
         page.on("request", on_request)
 
         def click_continue_with_email() -> None:
-            # Copilot shows a landing screen before the email input appears.
-            # Be resilient to minor UI changes and headless rendering differences.
+            trace("looking for continue-with-email button")
             locators = [
                 page.get_by_role("button", name="Continue with email"),
                 page.locator('button:has-text("Continue with email")'),
@@ -133,6 +351,7 @@ def main() -> int:
                 for loc in locators:
                     try:
                         if loc.count() > 0:
+                            trace("clicked continue-with-email button")
                             loc.first.click(force=True)
                             return
                     except Exception:
@@ -140,108 +359,189 @@ def main() -> int:
                 page.wait_for_timeout(250)
 
         def fill_email_address(addr: str) -> None:
+            trace(f"filling email fields for {addr}")
             selectors = [
-                page.get_by_placeholder("Email address"),
-                page.locator('input[type="email"]'),
-                page.locator('input[name="email"]'),
-                page.locator('input[autocomplete="email"]'),
+                'input[name="email"]',
+                'input[name="confirmEmail"]',
+                'input[type="email"]',
+                'input[autocomplete="email"]',
             ]
             for _ in range(40):
-                for sel in selectors:
+                filled = False
+                for selector in selectors:
+                    loc = page.locator(selector)
                     try:
-                        if sel.count() > 0:
-                            sel.first.click()
-                            sel.first.fill(addr)
-                            return
+                        count = loc.count()
                     except Exception:
-                        pass
+                        count = 0
+                    if count == 0:
+                        continue
+                    trace(f"found {count} field(s) for {selector}")
+                    for index in range(count):
+                        try:
+                            field = loc.nth(index)
+                            if not field.is_visible():
+                                continue
+                            field.click(timeout=1000)
+                            field.fill(addr, timeout=1000)
+                            trace(f"filled {selector} #{index + 1}")
+                            filled = True
+                        except Exception:
+                            continue
+                if filled:
+                    return
                 page.wait_for_timeout(250)
-            raise SystemExit('could not find email input')
+            raise SystemExit("could not find email input")
 
         def click_continue() -> None:
+            trace("looking for continue button")
             for name in ["Continue", "Send link", "Next"]:
                 try:
                     btn = page.get_by_role("button", name=name, exact=False)
                     if btn.count() > 0 and btn.first.is_enabled():
+                        trace(f"clicked continue button {name}")
                         btn.first.click()
                         return
                 except Exception:
                     pass
-            # last resort: first button
             try:
-                page.locator('button').first.click()
+                trace("clicked fallback first button")
+                page.locator("button").first.click(force=True)
                 return
             except Exception:
-                raise SystemExit('could not click Continue')
+                raise SystemExit("could not click Continue")
+
+        def request_email_link(addr: str) -> None:
+            try:
+                click_continue_with_email()
+            except Exception:
+                pass
+            page.wait_for_timeout(250)
+            fill_email_address(addr)
+            click_continue()
+
+        def maybe_storage_token() -> str | None:
+            try:
+                stores = page.evaluate(
+                    "() => ({ local: Object.fromEntries(Object.entries(localStorage)), session: Object.fromEntries(Object.entries(sessionStorage)) })"
+                )
+            except Exception:
+                return None
+
+            def scan(obj: object) -> str | None:
+                if not isinstance(obj, dict):
+                    return None
+                for value in obj.values():
+                    if not isinstance(value, str):
+                        continue
+                    raw = value.strip()
+                    if raw.lower().startswith("bearer "):
+                        raw = raw.split(" ", 1)[1].strip()
+                    if raw.startswith("eyJ") and raw.count(".") >= 2 and len(raw) > 200:
+                        return raw
+                    if "eyJ" in raw and raw.count(".") >= 2 and len(raw) > 200:
+                        match = re.search(r'''(eyJ[^\s"']{200,})''', raw)
+                        if match:
+                            return match.group(1)
+                return None
+
+            return scan(stores.get("local")) or scan(stores.get("session"))
+
+        def wait_for_token(timeout_seconds: int) -> str | None:
+            deadline = time.time() + max(1, int(timeout_seconds))
+            while time.time() < deadline:
+                if token and token_is_fresh(token):
+                    return token
+                storage_token = maybe_storage_token()
+                if storage_token and token_is_fresh(storage_token):
+                    return storage_token
+                page.wait_for_timeout(250)
+            return token if token and token_is_fresh(token) else None
 
         url = "https://app.copilot.money/"
         if email_link or credentials_mode:
             url = "https://app.copilot.money/login"
+        trace(f"navigating to {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        if session_mode:
-            # Rely on the persisted browser session to already be logged in.
-            # If no session exists, the caller should run interactive login once with `--user-data-dir`.
-            pass
-        elif interactive:
+        if interactive:
             print(
                 "Waiting for you to log in in the opened browser window...",
                 file=sys.stderr,
             )
-        elif email_link:
+        elif email_link or credentials_mode:
+            trace("requesting email link")
+            request_email_link(email)
             try:
-                click_continue_with_email()
+                trace("waiting for magic link email")
+                link = wait_for_magic_link(timeout_seconds=args.timeout_seconds, email=email)
             except Exception:
-                pass
-            page.wait_for_timeout(250)
-            fill_email_address(email)
-            click_continue()
-
-            # User must paste the magic link from their email. Hide input because it may contain tokens.
-            link = getpass.getpass(
-                "Paste Copilot sign-in link URL from your email (input hidden): "
-            ).strip()
-            if not link.startswith("http"):
-                print("invalid link", file=sys.stderr)
-                browser.close()
-                return 2
+                link = None
+            if not link:
+                link = getpass.getpass(
+                    "Paste Copilot sign-in link URL from your email (input hidden): "
+                ).strip()
+                if not link.startswith("http"):
+                    print("invalid link", file=sys.stderr)
+                    browser.close()
+                    return 2
+            trace("opening magic link")
             page.goto(link, wait_until="domcontentloaded", timeout=60_000)
-        else:
             try:
-                click_continue_with_email()
+                trace("filling email on auth/link confirmation")
+                fill_email_address(email)
             except Exception:
                 pass
-            page.wait_for_timeout(250)
-            fill_email_address(email)
-            click_continue()
+            try:
+                trace("confirming email link")
+                click_continue()
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
+            try:
+                trace("opening transactions after magic link")
+                page.goto(
+                    "https://app.copilot.money/transactions",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+            except Exception:
+                pass
 
-            page.get_by_role("button", name="Sign in with password instead").click()
-            page.locator('input[type="password"]').first.fill(password)
-            for name in ["Sign in", "Continue", "Log in"]:
-                btn = page.get_by_role("button", name=name)
-                if btn.count() > 0:
-                    btn.first.click()
-                    break
+        initial_wait_seconds = 5 if session_mode else args.timeout_seconds
+        trace(f"waiting for token for up to {initial_wait_seconds}s")
+        captured = wait_for_token(initial_wait_seconds)
 
-        deadline = time.time() + max(1, int(args.timeout_seconds))
-        while token is None and time.time() < deadline:
-            page.wait_for_timeout(250)
+        if session_mode and not captured:
+            try:
+                trace("session mode did not capture token on landing page; opening transactions route")
+                page.goto(
+                    "https://app.copilot.money/transactions",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+            except Exception:
+                trace("failed to open transactions route during session refresh")
 
-        if args.user_data_dir:
-            page.context.close()
-        else:
-            browser.close()
+        trace(f"waiting for token for up to {args.timeout_seconds}s after magic link")
+        captured = wait_for_token(args.timeout_seconds)
 
+        page.context.close()
+
+    token = captured or token
     if not token:
-        if session_mode and args.user_data_dir:
+        if temp_profile is not None:
+            temp_profile.cleanup()
+        if session_mode and user_data_dir:
             print(
-                "failed to capture token using persisted session; run `copilot auth login --persist-session` once",
+                "failed to capture token using persisted session; run `copilot auth login --persist-session` explicitly",
                 file=sys.stderr,
             )
         else:
             print("failed to capture token", file=sys.stderr)
         return 1
 
-    # Print token only; no newline surprises.
+    if temp_profile is not None:
+        temp_profile.cleanup()
     sys.stdout.write(token)
     return 0
 
