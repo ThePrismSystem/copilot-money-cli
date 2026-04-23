@@ -1,9 +1,12 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 
 use copilot_money_cli::client::{ClientMode, CopilotClient, TransactionIdRef};
 use copilot_money_cli::types::{AccountId, ItemId, TransactionId};
+
+static REFRESH_TOKEN_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn serve_one(status: u16, body: &'static str, assert_bearer: Option<&'static str>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -258,6 +261,7 @@ fn http_mode_errors_on_http_status() {
 
 #[test]
 fn http_mode_refreshes_token_on_unauthenticated_and_retries_once() {
+    let _env_guard = REFRESH_TOKEN_ENV_LOCK.lock().unwrap();
     // NOTE: In Rust 2024 edition, mutating process env is `unsafe` due to potential UB with
     // concurrent access. This test runs single-threaded with a narrowly-scoped env var used
     // only by the refresh hook.
@@ -288,6 +292,39 @@ fn http_mode_refreshes_token_on_unauthenticated_and_retries_once() {
 
     let saved = std::fs::read_to_string(&token_file).unwrap();
     assert_eq!(saved.trim(), "refreshed_token");
+
+    unsafe { std::env::remove_var("COPILOT_TEST_REFRESH_TOKEN") };
+}
+
+#[test]
+fn try_user_query_without_refresh_skips_session_refresh() {
+    let _env_guard = REFRESH_TOKEN_ENV_LOCK.lock().unwrap();
+    unsafe { std::env::set_var("COPILOT_TEST_REFRESH_TOKEN", "refreshed_token") };
+
+    let base_url = serve_one(
+        401,
+        r#"{"errors":[{"extensions":{"code":"UNAUTHENTICATED"},"message":"User is not authenticated"}]}"#,
+        Some("expired_token"),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let session_dir = tmp.path().join("session");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let token_file = tmp.path().join("token");
+
+    let client = CopilotClient::new(ClientMode::Http {
+        base_url,
+        token: Some("expired_token".to_string()),
+        token_file: token_file.clone(),
+        session_dir: Some(session_dir),
+    });
+
+    let err = client
+        .try_user_query_without_refresh()
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unauthenticated"));
+    assert!(!token_file.exists());
 
     unsafe { std::env::remove_var("COPILOT_TEST_REFRESH_TOKEN") };
 }

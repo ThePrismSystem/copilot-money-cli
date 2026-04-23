@@ -38,6 +38,29 @@ impl CopilotClient {
         Ok(())
     }
 
+    pub fn try_user_query_without_refresh(&self) -> anyhow::Result<()> {
+        let client = self.with_session_refresh_disabled();
+        let _ = client.graphql("User", ops::USER, json!({}))?;
+        Ok(())
+    }
+
+    fn with_session_refresh_disabled(&self) -> Self {
+        match &self.mode {
+            ClientMode::Http {
+                base_url,
+                token,
+                token_file,
+                ..
+            } => Self::new(ClientMode::Http {
+                base_url: base_url.clone(),
+                token: token.clone(),
+                token_file: token_file.clone(),
+                session_dir: None,
+            }),
+            ClientMode::Fixtures(dir) => Self::new(ClientMode::Fixtures(dir.clone())),
+        }
+    }
+
     pub fn list_transactions(&self, limit: usize) -> anyhow::Result<Vec<Transaction>> {
         Ok(self
             .list_transactions_page(limit, None, None, None)?
@@ -452,7 +475,8 @@ impl CopilotClient {
                         if attempt == 1
                             && let Some(dir) = session_dir.as_ref().filter(|d| d.exists())
                         {
-                            let refreshed = refresh_token_via_session(dir, 180)?;
+                            let refreshed =
+                                refresh_token_via_session(dir, refresh_timeout_seconds())?;
                             save_token(token_file, &refreshed)?;
                             current_token = Some(refreshed);
                             continue;
@@ -528,7 +552,17 @@ fn format_graphql_error(body: &Value) -> Option<String> {
     Some(out)
 }
 
-fn refresh_token_via_session(session_dir: &Path, timeout_seconds: u64) -> anyhow::Result<String> {
+fn refresh_timeout_seconds() -> u64 {
+    std::env::var("COPILOT_SESSION_REFRESH_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(20)
+}
+
+pub(crate) fn refresh_token_via_session(
+    session_dir: &Path,
+    timeout_seconds: u64,
+) -> anyhow::Result<String> {
     // Test hook: allow deterministic refresh without running the browser helper.
     // (Used by unit tests that simulate an expired token + refresh + retry.)
     if let Ok(t) = std::env::var("COPILOT_TEST_REFRESH_TOKEN")
@@ -542,21 +576,36 @@ fn refresh_token_via_session(session_dir: &Path, timeout_seconds: u64) -> anyhow
             "token refresh helper not found (install python3 + playwright, or re-run `copilot auth set-token`)"
         );
     };
-    let out = std::process::Command::new("python3")
-        .arg(helper)
-        .args(["--mode", "session"])
-        .args(["--user-data-dir", session_dir.to_string_lossy().as_ref()])
-        .args(["--timeout-seconds", &timeout_seconds.to_string()])
-        .output()?;
 
-    if !out.status.success() {
-        anyhow::bail!("token refresh helper failed");
+    let mut cmd = std::process::Command::new("python3");
+    cmd.arg(&helper)
+        .args(["--mode", "session"])
+        .args(["--timeout-seconds", &timeout_seconds.to_string()])
+        .args(["--user-data-dir", session_dir.to_string_lossy().as_ref()]);
+
+    let out = cmd.output()?;
+    if out.status.success() {
+        let token = String::from_utf8(out.stdout)?.trim().to_string();
+        if !token.is_empty() {
+            return Ok(token);
+        }
+        anyhow::bail!(
+            "session token helper returned empty token; run `copilot auth refresh` or `copilot auth login` explicitly"
+        );
     }
-    let token = String::from_utf8(out.stdout)?.trim().to_string();
-    if token.is_empty() {
-        anyhow::bail!("token refresh helper returned empty token");
+
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if stderr.is_empty() {
+        anyhow::bail!(
+            "session token helper failed; run `copilot auth refresh` or `copilot auth login` explicitly"
+        );
     }
-    Ok(token)
+
+    anyhow::bail!(
+        "session token helper failed: {stderr}
+
+Run `copilot auth refresh` or `copilot auth login` explicitly."
+    );
 }
 
 #[derive(Debug, Deserialize, Serialize)]

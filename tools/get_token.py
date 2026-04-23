@@ -62,56 +62,6 @@ def infer_email(explicit_email: str | None, secrets_file: Path) -> str | None:
         return None
 
 
-def recovery_state_path(user_data_dir: str | None) -> Path:
-    if user_data_dir:
-        return Path(user_data_dir) / ".codex-recovery-state.json"
-    return Path("~/.config/copilot-money-cli/recovery-state.json").expanduser()
-
-
-def load_recovery_state(path: Path) -> dict[str, float]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    state: dict[str, float] = {}
-    for key in ("last_attempt", "last_success"):
-        value = data.get(key)
-        if isinstance(value, (int, float)):
-            state[key] = float(value)
-    return state
-
-
-def save_recovery_state(
-    path: Path,
-    *,
-    last_attempt: float | None = None,
-    last_success: float | None = None,
-) -> None:
-    state = load_recovery_state(path)
-    if last_attempt is not None:
-        state["last_attempt"] = float(last_attempt)
-    if last_success is not None:
-        state["last_success"] = float(last_success)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def recovery_allowed(
-    path: Path, *, now: float | None = None, cooldown_seconds: int = 1800
-) -> tuple[bool, float]:
-    current = float(time.time() if now is None else now)
-    state = load_recovery_state(path)
-    last_attempt = state.get("last_attempt")
-    if last_attempt is None:
-        return True, 0.0
-    remaining = float(cooldown_seconds) - (current - last_attempt)
-    return remaining <= 0, max(0.0, remaining)
-
-
-
-
 def _reexec_under_xvfb_if_needed(mode: str, headful: bool) -> None:
     if mode not in {"email-link", "credentials", "session"}:
         return
@@ -356,8 +306,6 @@ def main() -> int:
     secrets_file = Path(args.secrets_file).expanduser()
     email = infer_email(args.email, secrets_file)
     user_data_dir, temp_profile = prepare_user_data_dir(mode, args.user_data_dir)
-    recovery_state = recovery_state_path(user_data_dir)
-
     if (credentials_mode or email_link) and not email:
         print("--email is required (or must be inferable from --secrets-file)", file=sys.stderr)
         return 2
@@ -469,67 +417,6 @@ def main() -> int:
             fill_email_address(addr)
             click_continue()
 
-        def try_session_email_recovery() -> str | None:
-            if not session_mode or not email:
-                return None
-            allowed, remaining = recovery_allowed(recovery_state)
-            if not allowed:
-                trace(
-                    f"skipping session email recovery; cooldown active for {remaining:.0f}s"
-                )
-                return None
-
-            save_recovery_state(recovery_state, last_attempt=time.time())
-            trace("session token capture failed; requesting magic-link recovery")
-            try:
-                page.goto(
-                    "https://app.copilot.money/login",
-                    wait_until="domcontentloaded",
-                    timeout=60_000,
-                )
-            except Exception:
-                trace("failed to open login page before session recovery")
-
-            try:
-                request_email_link(email)
-                link = wait_for_magic_link(
-                    timeout_seconds=args.timeout_seconds,
-                    email=email,
-                )
-            except BaseException as exc:
-                trace(f"session recovery magic-link request failed: {exc}")
-                return None
-
-            try:
-                trace("opening session recovery magic link")
-                page.goto(link, wait_until="domcontentloaded", timeout=60_000)
-            except BaseException as exc:
-                trace(f"failed to open session recovery link: {exc}")
-                return None
-
-            try:
-                fill_email_address(email)
-            except BaseException:
-                pass
-            try:
-                click_continue()
-                page.wait_for_timeout(1000)
-            except BaseException:
-                pass
-            try:
-                page.goto(
-                    "https://app.copilot.money/transactions",
-                    wait_until="domcontentloaded",
-                    timeout=60_000,
-                )
-            except Exception:
-                trace("failed to open transactions after session recovery link")
-
-            recovered = wait_for_token(args.timeout_seconds)
-            if recovered:
-                save_recovery_state(recovery_state, last_success=time.time())
-            return recovered
-
         def maybe_storage_token() -> str | None:
             try:
                 stores = page.evaluate(
@@ -634,9 +521,6 @@ def main() -> int:
 
         trace(f"waiting for token for up to {args.timeout_seconds}s after magic link")
         captured = wait_for_token(args.timeout_seconds)
-
-        if session_mode and not captured:
-            captured = try_session_email_recovery()
 
         page.context.close()
 

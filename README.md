@@ -66,7 +66,7 @@ By default, commands are **read-only**. Any write action either:
   - `--mode email-link`: SSH-friendly; you paste the sign-in link back (hidden input).
   - `--mode credentials`: uses `--secrets-file` (not recommended).
   - `--persist-session`: stores a Playwright browser session under `~/.config/copilot-money-cli/playwright-session` so tokens can be refreshed without re-auth.
-- Normal read commands now auto-refresh from the persisted session when the saved bearer token is stale. If session capture fails, the helper can request one fresh magic link using the configured Copilot email, then backs off for 30 minutes before trying that recovery path again.
+- Normal read commands now auto-refresh from the persisted session when the saved bearer token is stale. If session capture fails, the command fails fast and tells you to run `copilot auth refresh` or `copilot auth login` explicitly; it does not request magic-link emails on its own.
 - `copilot auth status` stays passive on purpose: it reports whether the current token works, but does not trigger refresh or send login emails.
 - `copilot auth refresh` — refresh token from the persisted browser session.
 - `copilot auth logout` — remove local token.

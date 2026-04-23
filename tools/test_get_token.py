@@ -170,119 +170,7 @@ class GetTokenTests(unittest.TestCase):
             'https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc',
         )
 
-    def test_recovery_allowed_enforces_cooldown(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            get_token.save_recovery_state(state_path, last_attempt=1_000.0)
-            allowed, remaining = get_token.recovery_allowed(
-                state_path,
-                now=1_100.0,
-                cooldown_seconds=300,
-            )
-
-        self.assertFalse(allowed)
-        self.assertEqual(remaining, 200.0)
-
-    def test_session_mode_skips_email_recovery_during_cooldown(self) -> None:
-        class _Page:
-            def __init__(self):
-                self.url = None
-                self.request_handler = None
-                self.goto_calls: list[str] = []
-                self.context = mock.Mock()
-
-            def on(self, name, handler):
-                self.request_handler = handler
-
-            def goto(self, url, **kwargs):
-                self.url = url
-                self.goto_calls.append(url)
-
-            def wait_for_timeout(self, ms):
-                return None
-
-            def evaluate(self, script):
-                return {"local": {}, "session": {}}
-
-            def get_by_role(self, *args, **kwargs):
-                raise AssertionError("cooldown should skip recovery UI")
-
-            def locator(self, *args, **kwargs):
-                raise AssertionError("cooldown should skip recovery UI")
-
-        class _Context:
-            def __init__(self, page):
-                self._page = page
-
-            def new_page(self):
-                return self._page
-
-            def close(self):
-                pass
-
-        class _Chromium:
-            def __init__(self, context):
-                self._context = context
-
-            def launch(self, **kwargs):
-                raise AssertionError("session mode should not use ephemeral browser")
-
-            def launch_persistent_context(self, *args, **kwargs):
-                return self._context
-
-        class _Playwright:
-            def __init__(self, context):
-                self.chromium = _Chromium(context)
-
-        class _PlaywrightCM:
-            def __init__(self, playwright):
-                self.playwright = playwright
-
-            def __enter__(self):
-                return self.playwright
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        page = _Page()
-        context = _Context(page)
-        playwright = _Playwright(context)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            secrets = Path(tmp) / "copilot_money"
-            secrets.write_text("email=pilotapp@javisoto.es\n", encoding="utf-8")
-            argv = [
-                "get_token.py",
-                "--mode",
-                "session",
-                "--timeout-seconds",
-                "1",
-                "--secrets-file",
-                str(secrets),
-                "--user-data-dir",
-                str(Path(tmp) / "profile"),
-            ]
-            with mock.patch.object(get_token, "sync_playwright", return_value=_PlaywrightCM(playwright)):
-                with mock.patch.object(get_token, "_reexec_into_integrations_venv_if_needed", return_value=None):
-                    with mock.patch.object(get_token, "_reexec_under_xvfb_if_needed", return_value=None):
-                        with mock.patch.object(get_token, "recovery_allowed", return_value=(False, 120.0)):
-                            with mock.patch.object(get_token, "wait_for_magic_link", side_effect=AssertionError("cooldown should skip magic link polling")):
-                                with mock.patch.object(get_token.sys, "argv", argv):
-                                    with mock.patch.object(get_token, "token_is_fresh", return_value=False):
-                                        rc = get_token.main()
-
-        self.assertEqual(rc, 1)
-        self.assertEqual(
-            page.goto_calls,
-            [
-                "https://app.copilot.money/",
-                "https://app.copilot.money/transactions",
-            ],
-        )
-
-    def test_session_mode_recovers_via_magic_link_when_session_capture_fails(self) -> None:
-        fresh_token = "eyJ" + ("a" * 210) + "." + ("b" * 40) + "." + ("c" * 40)
-
+    def test_session_mode_fails_without_requesting_magic_link_when_session_capture_fails(self) -> None:
         class _Element:
             def __init__(self, *, visible=True, enabled=True):
                 self._visible = visible
@@ -324,10 +212,7 @@ class GetTokenTests(unittest.TestCase):
                 self.context = mock.Mock()
                 self.visible_email = _Element(visible=True)
                 self.hidden_confirm = _Element(visible=False)
-                self.password_field = _Element(visible=True)
                 self.continue_button = _Element(visible=True, enabled=True)
-                self.email_button = _Element(visible=True, enabled=True)
-                self.transactions_visits = 0
 
             def on(self, name, handler):
                 self.request_handler = handler
@@ -335,22 +220,16 @@ class GetTokenTests(unittest.TestCase):
             def goto(self, url, **kwargs):
                 self.url = url
                 self.goto_calls.append(url)
-                if url == "https://app.copilot.money/transactions":
-                    self.transactions_visits += 1
 
             def wait_for_timeout(self, ms):
                 return None
 
             def evaluate(self, script):
-                if self.url == "https://app.copilot.money/transactions" and self.transactions_visits >= 2:
-                    return {"local": {"token": fresh_token}, "session": {}}
                 return {"local": {}, "session": {}}
 
             def get_by_role(self, role, name=None, exact=None):
                 if role != "button":
                     return _Locator([])
-                if name == "Continue with email":
-                    return _Locator([self.email_button])
                 if name in {"Continue", "Send link", "Next"}:
                     return _Locator([self.continue_button])
                 return _Locator([])
@@ -361,8 +240,6 @@ class GetTokenTests(unittest.TestCase):
                     'input[name="confirmEmail"]': [self.hidden_confirm],
                     'input[type="email"]': [],
                     'input[autocomplete="email"]': [],
-                    'button:has-text("Continue with email")': [self.email_button],
-                    'text=Continue with email': [self.email_button],
                     'button': [self.continue_button],
                 }
                 return _Locator(mapping.get(selector, []))
@@ -422,22 +299,18 @@ class GetTokenTests(unittest.TestCase):
             with mock.patch.object(get_token, "sync_playwright", return_value=_PlaywrightCM(playwright)):
                 with mock.patch.object(get_token, "_reexec_into_integrations_venv_if_needed", return_value=None):
                     with mock.patch.object(get_token, "_reexec_under_xvfb_if_needed", return_value=None):
-                        with mock.patch.object(get_token, "wait_for_magic_link", return_value="https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc"):
-                            with mock.patch.object(get_token, "recovery_allowed", return_value=(True, 0.0)):
-                                with mock.patch.object(get_token.sys, "argv", argv):
-                                    with mock.patch.object(get_token, "token_is_fresh", side_effect=lambda token, grace_seconds=60: token == fresh_token):
-                                        rc = get_token.main()
+                        with mock.patch.object(get_token, "wait_for_magic_link", side_effect=AssertionError("session mode must not poll Gmail for a magic link")):
+                            with mock.patch.object(get_token.sys, "argv", argv):
+                                with mock.patch.object(get_token, "token_is_fresh", return_value=False):
+                                    rc = get_token.main()
 
-        self.assertEqual(rc, 0)
-        self.assertEqual(page.visible_email.fills, ["pilotapp@javisoto.es", "pilotapp@javisoto.es"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(page.visible_email.fills, [])
         self.assertEqual(page.hidden_confirm.fills, [])
         self.assertEqual(
             page.goto_calls,
             [
                 "https://app.copilot.money/",
-                "https://app.copilot.money/transactions",
-                "https://app.copilot.money/login",
-                "https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc",
                 "https://app.copilot.money/transactions",
             ],
         )
