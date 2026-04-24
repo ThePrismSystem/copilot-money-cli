@@ -9,7 +9,7 @@ use super::{BudgetsCmd, Cli};
 pub(super) fn run_budgets(
     cli: &Cli,
     client: &CopilotClient,
-    cmd: BudgetsCmd,
+    cmd: &BudgetsCmd,
 ) -> anyhow::Result<()> {
     match cmd {
         BudgetsCmd::Month => {

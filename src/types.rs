@@ -90,11 +90,17 @@ impl<'de, T> Deserialize<'de> for OwnedId<T> {
     }
 }
 
+#[derive(Debug)]
 pub enum TransactionMarker {}
+#[derive(Debug)]
 pub enum CategoryMarker {}
+#[derive(Debug)]
 pub enum TagMarker {}
+#[derive(Debug)]
 pub enum RecurringMarker {}
+#[derive(Debug)]
 pub enum AccountMarker {}
+#[derive(Debug)]
 pub enum ItemMarker {}
 
 pub type TransactionId = OwnedId<TransactionMarker>;
@@ -116,9 +122,9 @@ pub enum TransactionType {
 impl fmt::Display for TransactionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            TransactionType::Regular => "REGULAR",
-            TransactionType::InternalTransfer => "INTERNAL_TRANSFER",
-            TransactionType::Other => "OTHER",
+            Self::Regular => "REGULAR",
+            Self::InternalTransfer => "INTERNAL_TRANSFER",
+            Self::Other => "OTHER",
         };
         write!(f, "{s}")
     }
@@ -140,13 +146,13 @@ pub enum RecurringFrequency {
 impl fmt::Display for RecurringFrequency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            RecurringFrequency::Daily => "DAILY",
-            RecurringFrequency::Weekly => "WEEKLY",
-            RecurringFrequency::Biweekly => "BIWEEKLY",
-            RecurringFrequency::Monthly => "MONTHLY",
-            RecurringFrequency::Quarterly => "QUARTERLY",
-            RecurringFrequency::Annually => "ANNUALLY",
-            RecurringFrequency::Other => "OTHER",
+            Self::Daily => "DAILY",
+            Self::Weekly => "WEEKLY",
+            Self::Biweekly => "BIWEEKLY",
+            Self::Monthly => "MONTHLY",
+            Self::Quarterly => "QUARTERLY",
+            Self::Annually => "ANNUALLY",
+            Self::Other => "OTHER",
         };
         write!(f, "{s}")
     }

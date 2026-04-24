@@ -63,7 +63,7 @@ fn serve_one(status: u16, body: &'static str, assert_bearer: Option<&'static str
         stream.write_all(resp.as_bytes()).unwrap();
     });
 
-    format!("http://{}", addr)
+    format!("http://{addr}")
 }
 
 fn serve_one_with_body_assert(
@@ -128,7 +128,7 @@ fn serve_one_with_body_assert(
         stream.write_all(resp.as_bytes()).unwrap();
     });
 
-    format!("http://{}", addr)
+    format!("http://{addr}")
 }
 
 fn serve_two(
@@ -198,7 +198,7 @@ fn serve_two(
         }
     });
 
-    format!("http://{}", addr)
+    format!("http://{addr}")
 }
 
 #[test]

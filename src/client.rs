@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -29,7 +30,7 @@ pub struct CopilotClient {
 }
 
 impl CopilotClient {
-    pub fn new(mode: ClientMode) -> Self {
+    pub const fn new(mode: ClientMode) -> Self {
         Self { mode }
     }
 
@@ -67,6 +68,8 @@ impl CopilotClient {
             .transactions)
     }
 
+    // `after` / `filter` / `sort` are consumed when embedded in the `json!` macro payload.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn list_transactions_page(
         &self,
         first: usize,
@@ -185,8 +188,7 @@ impl CopilotClient {
                 .to_string();
             let amount = item
                 .get("amount")
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".into());
+                .map_or_else(|| "null".into(), std::string::ToString::to_string);
             out.push(BudgetMonth { month, amount });
         }
         Ok(out)
@@ -200,6 +202,7 @@ impl CopilotClient {
         self.bulk_edit_transactions(ids, json!({ "isReviewed": is_reviewed }))
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn bulk_edit_transactions(
         &self,
         ids: Vec<TransactionIdRef>,
@@ -245,6 +248,7 @@ impl CopilotClient {
         })
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn edit_transaction(
         &self,
         item_id: &ItemId,
@@ -341,7 +345,7 @@ impl CopilotClient {
 
         let v = data
             .pointer("/data/deleteTag")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .ok_or_else(|| anyhow::anyhow!("unexpected DeleteTag response shape"))?;
         Ok(v)
     }
@@ -365,6 +369,7 @@ impl CopilotClient {
         Ok(serde_json::from_value(tag)?)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn create_category(
         &self,
         input: Value,
@@ -417,6 +422,7 @@ impl CopilotClient {
         Ok(serde_json::from_value(recurring)?)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn edit_recurring(&self, id: &RecurringId, input: Value) -> anyhow::Result<Recurring> {
         let data = self.graphql(
             "EditRecurring",
@@ -434,6 +440,7 @@ impl CopilotClient {
         Ok(serde_json::from_value(recurring)?)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn graphql(
         &self,
         operation_name: &str,
@@ -544,10 +551,10 @@ fn format_graphql_error(body: &Value) -> Option<String> {
     let mut out = String::new();
     out.push_str("graphql error");
     if let Some(c) = code {
-        out.push_str(&format!(" ({c})"));
+        write!(out, " ({c})").expect("write! to String is infallible");
     }
     if !message.is_empty() {
-        out.push_str(&format!(": {message}"));
+        write!(out, ": {message}").expect("write! to String is infallible");
     }
     Some(out)
 }
@@ -709,7 +716,7 @@ pub struct Category {
     pub color_name: Option<String>,
     pub icon: Option<Icon>,
     #[serde(rename = "childCategories")]
-    pub child_categories: Option<Vec<Category>>,
+    pub child_categories: Option<Vec<Self>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

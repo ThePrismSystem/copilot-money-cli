@@ -7,6 +7,7 @@ use crate::types::{CategoryId, RecurringId};
 use super::render::{KeyValueRow, TableRow, render_output, shorten_id_for_table};
 use super::{Cli, RecurringsCmd, RecurringsListArgs};
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_recurrings(
     cli: &Cli,
     client: &CopilotClient,
@@ -51,7 +52,7 @@ pub(super) fn run_recurrings(
                             value: r
                                 .category_id
                                 .as_ref()
-                                .map(|c| c.to_string())
+                                .map(std::string::ToString::to_string)
                                 .unwrap_or_default(),
                         },
                     ],
@@ -108,7 +109,7 @@ pub(super) fn run_recurrings(
                         value: recurring
                             .frequency
                             .as_ref()
-                            .map(|v| v.to_string())
+                            .map(std::string::ToString::to_string)
                             .unwrap_or_default(),
                     },
                     KeyValueRow {
@@ -116,7 +117,7 @@ pub(super) fn run_recurrings(
                         value: recurring
                             .category_id
                             .as_ref()
-                            .map(|v| v.to_string())
+                            .map(std::string::ToString::to_string)
                             .unwrap_or_default(),
                     },
                 ],
@@ -200,7 +201,7 @@ pub(super) fn run_recurrings(
                         value: recurring
                             .frequency
                             .as_ref()
-                            .map(|v| v.to_string())
+                            .map(std::string::ToString::to_string)
                             .unwrap_or_default(),
                     },
                     KeyValueRow {
@@ -208,7 +209,7 @@ pub(super) fn run_recurrings(
                         value: recurring
                             .category_id
                             .as_ref()
-                            .map(|v| v.to_string())
+                            .map(std::string::ToString::to_string)
                             .unwrap_or_default(),
                     },
                 ],

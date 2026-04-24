@@ -425,7 +425,7 @@ pub struct TransactionsEditArgs {
     #[arg(long = "type")]
     pub type_: Option<TransactionType>,
 
-    /// Raw JSON to pass as EditTransactionInput (advanced).
+    /// Raw JSON to pass as `EditTransactionInput` (advanced).
     #[arg(long)]
     pub input_json: Option<String>,
 }
@@ -591,8 +591,10 @@ pub enum BudgetsCmd {
     Set,
 }
 
+// Takes `Cli` by value — `main` consumes it once and hands it off.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(cli: Cli) -> anyhow::Result<()> {
-    if let Command::Version = &cli.command {
+    if matches!(&cli.command, Command::Version) {
         println!("copilot-money-cli {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
@@ -608,7 +610,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         None => ClientMode::Http {
             base_url: cli.base_url.clone(),
             token,
-            token_file: token_file_path.clone(),
+            token_file: token_file_path,
             session_dir: cli
                 .session_dir
                 .clone()
@@ -623,7 +625,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Categories { cmd } => categories::run_categories(&cli, &client, cmd.clone()),
         Command::Recurrings { cmd } => recurrings::run_recurrings(&cli, &client, cmd.clone()),
         Command::Tags { cmd } => tags::run_tags(&cli, &client, cmd.clone()),
-        Command::Budgets { cmd } => budgets::run_budgets(&cli, &client, cmd.clone()),
+        Command::Budgets { cmd } => budgets::run_budgets(&cli, &client, cmd),
         Command::Version => unreachable!(),
     }
 }
@@ -638,11 +640,10 @@ impl TableRow for KeyValueRow {
 
 fn value_to_string(v: Option<serde_json::Value>) -> String {
     match v {
-        None => String::new(),
+        None | Some(serde_json::Value::Null) => String::new(),
         Some(serde_json::Value::String(s)) => s,
         Some(serde_json::Value::Number(n)) => n.to_string(),
         Some(serde_json::Value::Bool(b)) => b.to_string(),
-        Some(serde_json::Value::Null) => String::new(),
         Some(other) => other.to_string(),
     }
 }
@@ -658,21 +659,24 @@ fn value_to_money_string(v: Option<serde_json::Value>) -> String {
     let negative = trimmed.starts_with('-');
     let numeric = trimmed.trim_start_matches('-');
 
-    if let Ok(n) = numeric.parse::<f64>() {
-        let formatted = format!("{:.2}", n.abs());
-        if negative {
-            format!("-${formatted}")
-        } else {
-            format!("${formatted}")
-        }
-    } else {
-        // Fallback: keep original, but prefix `$` if it looks like a number.
-        if negative {
-            format!("-${numeric}")
-        } else {
-            format!("${trimmed}")
-        }
-    }
+    numeric.parse::<f64>().map_or_else(
+        |_| {
+            // Fallback: keep original, but prefix `$` if it looks like a number.
+            if negative {
+                format!("-${numeric}")
+            } else {
+                format!("${trimmed}")
+            }
+        },
+        |n| {
+            let formatted = format!("{:.2}", n.abs());
+            if negative {
+                format!("-${formatted}")
+            } else {
+                format!("${formatted}")
+            }
+        },
+    )
 }
 
 fn normalize_date(s: &str) -> Option<String> {
@@ -761,7 +765,7 @@ fn resolve_category_id(
         .collect::<Vec<_>>();
 
     match matches.as_slice() {
-        [] => anyhow::bail!("no category named {:?}", name),
+        [] => anyhow::bail!("no category named {name:?}"),
         [(id, _)] => Ok(Some(id.clone())),
         many => anyhow::bail!(
             "category name {:?} is ambiguous ({} matches); use --category-id instead",
@@ -798,6 +802,7 @@ fn confirm_write(cli: &Cli, action: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> anyhow::Result<()> {
     match cmd {
         TransactionsCmd::List(args) => {
@@ -892,7 +897,7 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                             value: t
                                 .category_id
                                 .as_ref()
-                                .map(|c| c.to_string())
+                                .map(std::string::ToString::to_string)
                                 .unwrap_or_default(),
                         },
                         KeyValueRow {
@@ -1209,7 +1214,7 @@ fn resolve_transactions_by_ids(
     for _ in 0..max_pages {
         let page = client.list_transactions_page(200, cursor.clone(), None, None)?;
         let has_next = page.page_info.has_next_page.unwrap_or(false);
-        cursor = page.page_info.end_cursor.clone();
+        cursor.clone_from(&page.page_info.end_cursor);
         scanned += page.transactions.len();
 
         for t in page.transactions {
@@ -1292,10 +1297,10 @@ fn render_transactions_updated(cli: &Cli, items: Vec<Transaction>) -> anyhow::Re
             };
             let s = serde_json::to_string_pretty(&out)?;
             println!("{s}");
-            Ok(())
         }
         OutputFormat::Table => render_transactions_table(cli, &items, DEFAULT_FIELDS, None),
     }
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -1305,6 +1310,9 @@ struct TransactionsJsonOutput {
     page_info: Option<PageInfo>,
 }
 
+// `filter` / `sort` are owned so they can be `.clone()`d on each pagination call
+// without requiring callers to hold the values past the call.
+#[allow(clippy::needless_pass_by_value)]
 fn fetch_transactions_with_filter_sort(
     client: &CopilotClient,
     page_size: usize,
@@ -1327,7 +1335,7 @@ fn fetch_transactions_with_filter_sort(
             filter.clone(),
             sort.clone(),
         )?;
-        cursor = page.page_info.end_cursor.clone();
+        cursor.clone_from(&page.page_info.end_cursor);
         last_page_info = Some(page.page_info);
         out.extend(page.transactions);
 
@@ -1360,7 +1368,7 @@ fn filter_transactions(
     query: Option<&str>,
     date: Option<&str>,
 ) -> Vec<Transaction> {
-    let q = query.map(|s| s.to_lowercase());
+    let q = query.map(str::to_lowercase);
     let want_tags = tags.iter().map(|t| t.to_lowercase()).collect::<Vec<_>>();
 
     items
@@ -1412,7 +1420,7 @@ fn render_transactions_table(
     items: &[Transaction],
     fields: &[TransactionField],
     categories: Option<&HashMap<CategoryId, String>>,
-) -> anyhow::Result<()> {
+) {
     use comfy_table::CellAlignment;
 
     let mut table = Table::new();
@@ -1473,8 +1481,8 @@ fn render_transactions_table(
                         .category_id
                         .as_ref()
                         .and_then(|id| categories.and_then(|m| m.get(id)))
-                        .map(|s| s.as_str())
-                        .or_else(|| t.category_id.as_ref().map(|id| id.as_str()))
+                        .map(std::string::String::as_str)
+                        .or_else(|| t.category_id.as_ref().map(super::types::OwnedId::as_str))
                         .unwrap_or("");
                     cells.push(Cell::new(name));
                 }
@@ -1494,7 +1502,7 @@ fn render_transactions_table(
                 TransactionField::Type => cells.push(Cell::new(
                     t.txn_type
                         .as_ref()
-                        .map(|t| t.to_string())
+                        .map(std::string::ToString::to_string)
                         .unwrap_or_default(),
                 )),
                 TransactionField::Id => cells.push(Cell::new(shorten_id_for_table(t.id.as_str()))),
@@ -1504,7 +1512,6 @@ fn render_transactions_table(
     }
 
     println!("{table}");
-    Ok(())
 }
 
 fn render_transactions_output(
@@ -1531,7 +1538,7 @@ fn render_transactions_output(
             } else {
                 None
             };
-            render_transactions_table(cli, &items, fields, cats.as_ref())?;
+            render_transactions_table(cli, &items, fields, cats.as_ref());
             if include_page_info {
                 render_output(
                     cli,
