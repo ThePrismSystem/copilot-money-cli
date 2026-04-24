@@ -17,7 +17,44 @@ jobs:
       - name: test
         run: cargo test
       - name: clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ruff
+        uses: astral-sh/ruff-action@v3
+      - name: ruff check
+        run: ruff check tools/
+      - name: ruff format --check
+        run: ruff format --check tools/
+
+      - name: Install shfmt
+        env:
+          SHFMT_VERSION: v3.13.1
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" \
+            -o "$HOME/.local/bin/shfmt"
+          chmod +x "$HOME/.local/bin/shfmt"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: shfmt
+        run: shfmt -d -i 2 -ci scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+
+      - name: shellcheck
+        run: shellcheck -S style scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+
+      - name: Install taplo
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
+            | gunzip > "$HOME/.local/bin/taplo"
+          chmod +x "$HOME/.local/bin/taplo"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: taplo fmt --check
+        run: taplo fmt --check
 
   gitleaks:
     runs-on: ubuntu-latest

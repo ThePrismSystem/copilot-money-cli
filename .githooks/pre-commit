@@ -4,7 +4,39 @@ set -euo pipefail
 if command -v cargo >/dev/null 2>&1; then
   cargo fmt --all -- --check
   cargo test
-  cargo clippy -- -D warnings
+  cargo clippy --all-targets -- -D warnings
+fi
+
+# Python: lint + format check.
+if command -v ruff >/dev/null 2>&1; then
+  ruff check tools/
+  ruff format --check tools/
+else
+  echo "warning: ruff not found; skipping Python lint/format checks" >&2
+  echo "  install: uv tool install ruff" >&2
+fi
+
+# Shell: format + static analysis.
+if command -v shfmt >/dev/null 2>&1; then
+  shfmt -d -i 2 -ci scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+else
+  echo "warning: shfmt not found; skipping shell format check" >&2
+  echo "  install: go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck -S style scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+else
+  echo "warning: shellcheck not found; skipping shell static analysis" >&2
+  echo "  install: see https://github.com/koalaman/shellcheck#installing" >&2
+fi
+
+# TOML: format check.
+if command -v taplo >/dev/null 2>&1; then
+  taplo fmt --check
+else
+  echo "warning: taplo not found; skipping TOML format check" >&2
+  echo "  install: curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz | gunzip > ~/.local/bin/taplo && chmod +x ~/.local/bin/taplo" >&2
 fi
 
 if command -v gitleaks >/dev/null 2>&1; then
@@ -12,4 +44,3 @@ if command -v gitleaks >/dev/null 2>&1; then
 else
   echo "warning: gitleaks not found; skipping local secret scan" >&2
 fi
-

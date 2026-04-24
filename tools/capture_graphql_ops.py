@@ -7,11 +7,14 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import sync_playwright
+
+# Cap for file-safe slugs derived from GraphQL operation names.
+_MAX_SLUG_LEN = 120
 
 
 @dataclass(frozen=True)
@@ -21,7 +24,7 @@ class Credentials:
 
 
 def _now_slug() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
 
 
 def load_credentials(path: Path) -> Credentials:
@@ -50,7 +53,7 @@ def safe_filename(s: str) -> str:
     if not s:
         return "unknown"
     s = re.sub(r"[^a-zA-Z0-9._-]+", "_", s)
-    return s[:120] if len(s) > 120 else s
+    return s[:_MAX_SLUG_LEN] if len(s) > _MAX_SLUG_LEN else s
 
 
 def _normalize_query(query: str) -> str:
@@ -70,10 +73,7 @@ def _operation_kind(query: str) -> str:
 def _try_request_json(req) -> dict[str, Any] | None:
     attr = getattr(req, "post_data_json", None)
     try:
-        if callable(attr):
-            payload = attr()
-        else:
-            payload = attr
+        payload = attr() if callable(attr) else attr
     except Exception:
         payload = None
 
@@ -170,7 +170,7 @@ def main() -> int:
         variables = payload.get("variables")
         variable_keys: list[str] = []
         if isinstance(variables, dict):
-            variable_keys = sorted([str(k) for k in variables.keys()])
+            variable_keys = sorted([str(k) for k in variables])
 
         kind = _operation_kind(query)
         key = _stable_id(operation_name, query)
@@ -221,7 +221,7 @@ def main() -> int:
     manifest_path.write_text(
         json.dumps(
             {
-                "capturedAt": datetime.now().isoformat(),
+                "capturedAt": datetime.now(UTC).isoformat(),
                 "count": len(ops),
                 "debug": dbg,
                 "operations": list(ops.values()),

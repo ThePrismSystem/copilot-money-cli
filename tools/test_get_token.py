@@ -34,7 +34,7 @@ class GetTokenTests(unittest.TestCase):
         html = (
             '<a href="https://app.copilot.money/login">Open Copilot</a>'
             '<a href="https://example.com/__/auth/action?mode=signIn&oobCode=abc&apiKey=123">'
-            'Magic link</a>'
+            "Magic link</a>"
         )
         payload = {
             "payload": {
@@ -43,9 +43,7 @@ class GetTokenTests(unittest.TestCase):
                 "parts": [
                     {
                         "mimeType": "text/html",
-                        "body": {
-                            "data": __import__("base64").urlsafe_b64encode(html.encode("utf-8")).decode("utf-8")
-                        },
+                        "body": {"data": __import__("base64").urlsafe_b64encode(html.encode("utf-8")).decode("utf-8")},
                     }
                 ],
             }
@@ -55,7 +53,6 @@ class GetTokenTests(unittest.TestCase):
             links[0],
             "https://example.com/__/auth/action?mode=signIn&oobCode=abc&apiKey=123",
         )
-
 
     def test_prepare_user_data_dir_creates_temp_profile_for_credentials_mode(self) -> None:
         profile_dir, temp_profile = get_token.prepare_user_data_dir("credentials", None)
@@ -147,7 +144,6 @@ class GetTokenTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "cookie-state")
             self.assertEqual(list(profile.parent.glob(f"{profile.name}.broken-*")), [])
 
-
     def test_wait_for_magic_link_accepts_recent_message_before_poll_start(self) -> None:
         html = '<a href="https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc">Magic link</a>'
         message = {
@@ -159,9 +155,7 @@ class GetTokenTests(unittest.TestCase):
                 "parts": [
                     {
                         "mimeType": "text/html",
-                        "body": {
-                            "data": __import__("base64").urlsafe_b64encode(html.encode("utf-8")).decode("utf-8")
-                        },
+                        "body": {"data": __import__("base64").urlsafe_b64encode(html.encode("utf-8")).decode("utf-8")},
                     }
                 ],
             },
@@ -189,14 +183,14 @@ class GetTokenTests(unittest.TestCase):
             def users(self):
                 return _Users()
 
-        with mock.patch.object(get_token, '_gmail_service', return_value=_Service()):
-            with mock.patch.object(get_token.time, 'time', side_effect=[1_000_000, 1_000_000, 1_000_000]):
-                with mock.patch.object(get_token.time, 'sleep', return_value=None):
-                    link = get_token.wait_for_magic_link(timeout_seconds=20, email='pilotapp@javisoto.es')
+        with mock.patch.object(get_token, "_gmail_service", return_value=_Service()):
+            with mock.patch.object(get_token.time, "time", side_effect=[1_000_000, 1_000_000, 1_000_000]):
+                with mock.patch.object(get_token.time, "sleep", return_value=None):
+                    link = get_token.wait_for_magic_link(timeout_seconds=20, email="pilotapp@javisoto.es")
 
         self.assertEqual(
             link,
-            'https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc',
+            "https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc",
         )
 
     def test_session_mode_fails_without_requesting_magic_link_when_session_capture_fails(self) -> None:
@@ -269,7 +263,7 @@ class GetTokenTests(unittest.TestCase):
                     'input[name="confirmEmail"]': [self.hidden_confirm],
                     'input[type="email"]': [],
                     'input[autocomplete="email"]': [],
-                    'button': [self.continue_button],
+                    "button": [self.continue_button],
                 }
                 return _Locator(mapping.get(selector, []))
 
@@ -328,7 +322,11 @@ class GetTokenTests(unittest.TestCase):
             with mock.patch.object(get_token, "sync_playwright", return_value=_PlaywrightCM(playwright)):
                 with mock.patch.object(get_token, "_reexec_into_integrations_venv_if_needed", return_value=None):
                     with mock.patch.object(get_token, "_reexec_under_xvfb_if_needed", return_value=None):
-                        with mock.patch.object(get_token, "wait_for_magic_link", side_effect=AssertionError("session mode must not poll Gmail for a magic link")):
+                        with mock.patch.object(
+                            get_token,
+                            "wait_for_magic_link",
+                            side_effect=AssertionError("session mode must not poll Gmail for a magic link"),
+                        ):
                             with mock.patch.object(get_token.sys, "argv", argv):
                                 with mock.patch.object(get_token, "token_is_fresh", return_value=False):
                                     rc = get_token.main()

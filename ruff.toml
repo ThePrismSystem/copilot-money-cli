@@ -1,0 +1,83 @@
+# Strict ruff config for the Python helpers in tools/.
+# See https://docs.astral.sh/ruff/rules/ for rule descriptions.
+
+target-version = "py312"
+line-length = 120
+src = ["tools"]
+
+[format]
+# Match ruff's defaults (double quotes, space indent, trailing comma in multi-line).
+quote-style = "double"
+
+[lint]
+# Select every category, then justify each ignore below.
+select = ["ALL"]
+
+ignore = [
+  # Docstrings — these are CLI helper scripts, not a library API.
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D106",
+  "D107",
+  "D203",
+  "D212",
+  # Type annotations — partial hints are acceptable for scripts; not requiring full coverage.
+  "ANN001",
+  "ANN002",
+  "ANN003",
+  "ANN201",
+  "ANN202",
+  "ANN204",
+  "ANN205",
+  "ANN206",
+  "ANN401",
+  # `print` is fine — this is a CLI helper that emits status on stderr.
+  "T201",
+  # unittest style is already used here; pytest-style assertions not required.
+  "PT009",
+  "PT027",
+  # Missing `__init__.py` — tools/ isn't a package, it's standalone scripts.
+  "INP001",
+  # Low-value stylistic rules.
+  "EM101",
+  "EM102",  # raw/f-string in exception
+  "TRY003", # raise-vanilla-args (noisy for anyhow-style messages)
+  "COM812", # trailing comma (ruff format handles this)
+  # Boolean positional arg is a conscious choice for the helper's CLI interface.
+  "FBT001",
+  "FBT002",
+]
+
+[lint.per-file-ignores]
+# Helper scripts use fall-through exception handling around browser automation
+# and subprocess calls. These aren't production library code, so we relax
+# several rules that don't fit CLI-helper patterns.
+"tools/*.py" = [
+  "BLE001",  # blind except — used in browser automation fall-throughs
+  "S110",    # try-except-pass — same pattern (stale browser state)
+  "S112",    # try-except-continue — same pattern
+  "S108",    # hardcoded tempfile — tests use /tmp paths for mock dirs
+  "S606",    # start-process-with-no-shell — os.execv into known binaries
+  "PLC0415", # import-outside-top-level — conditional imports from optional venvs
+  "C901",    # complex-structure — CLI dispatch fns naturally branch a lot
+  "PLR0912",
+  "PLR0915",
+  "TRY002",  # vanilla raise — SystemExit("...") is the right tool here
+  "TRY300",  # try-else clause — minor stylistic preference
+  "E501",    # line-too-long — long URLs and string literals
+]
+# Tests may legitimately use `assert`, magic values, deep fixtures, etc.
+"tools/test_*.py" = [
+  "S101",    # assert usage
+  "PLR2004", # magic values in tests
+  "SLF001",  # private-member access (we test internals)
+  "ARG002",  # mock method signatures match the real thing; unused args intentional
+  "SIM117",  # deeply-nested `with` blocks for mocks
+]
+
+[lint.pydocstyle]
+convention = "google"
