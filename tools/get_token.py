@@ -14,6 +14,7 @@ import tempfile
 import time
 from base64 import urlsafe_b64decode
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
@@ -223,7 +224,11 @@ def extract_links(message: dict) -> list[str]:
     if firebase:
         return sorted(set(firebase), key=len, reverse=True)
 
-    app_links = [url for url in candidates if url.startswith("https://app.copilot.money")]
+    def _is_copilot_app_url(url: str) -> bool:
+        parsed = urlparse(url)
+        return parsed.scheme == "https" and parsed.hostname == "app.copilot.money"
+
+    app_links = [url for url in candidates if _is_copilot_app_url(url)]
     return sorted(set(app_links), key=len, reverse=True)
 
 
