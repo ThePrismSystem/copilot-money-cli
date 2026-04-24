@@ -1,9 +1,9 @@
 name: release
 
+# Disabled on this fork — releases are cut from upstream JaviSoto/copilot-money-cli.
+# Re-enable by restoring the `push: tags: ['v*']` trigger.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
