@@ -3,6 +3,8 @@ name: ci
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   rust:
@@ -82,5 +84,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-      - name: coverage
-        run: cargo llvm-cov --workspace --summary-only
+      - name: Generate coverage (Codecov format)
+        run: cargo llvm-cov --workspace --codecov --output-path codecov.json
+      - name: Coverage summary
+        run: cargo llvm-cov report --summary-only
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: codecov.json
+          fail_ci_if_error: true
