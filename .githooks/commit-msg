@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Validates commit messages against Conventional Commits via commitizen.
+# Install: `uv tool install commitizen` (or `pipx install commitizen`).
+set -euo pipefail
+
+if ! command -v cz >/dev/null 2>&1; then
+  echo "commit-msg: commitizen (cz) not found on PATH — skipping validation" >&2
+  echo "  install: uv tool install commitizen   (or: pipx install commitizen)" >&2
+  exit 0
+fi
+
+# --allow-abort        : let empty messages abort the commit instead of failing.
+# --allowed-prefixes   : skip validation for git-generated messages.
+# --message-length-limit 72 : cap the subject line (Conventional Commits norm).
+exec cz check \
+  --commit-msg-file "$1" \
+  --allow-abort \
+  --allowed-prefixes "Merge" "Revert" "fixup!" "squash!" "amend!" \
+  --message-length-limit 72
