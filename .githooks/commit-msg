@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Validates commit messages against Conventional Commits via commitizen.
+# Install: `uv tool install commitizen` (or `pipx install commitizen`).
+set -euo pipefail
+
+if ! command -v cz >/dev/null 2>&1; then
+  echo "commit-msg: commitizen (cz) not found on PATH — falling back to regex check" >&2
+  echo "  install: uv tool install commitizen   (or: pipx install commitizen)" >&2
+  # First non-empty, non-comment line must match the Conventional Commits shape.
+  subject=$(grep -v '^#' "$1" | sed '/^\s*$/d' | head -n1)
+  if [ -z "$subject" ]; then
+    # Empty message — defer to git's abort-on-empty behavior.
+    exit 0
+  fi
+  case "$subject" in
+    Merge* | Revert* | "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+  esac
+  if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|refactor|docs|test|chore|style|perf|ci|build|revert)(\(.+\))?!?: .{1,72}$'; then
+    echo "commit-msg: subject does not match Conventional Commits (type(scope)?: description, <=72 chars)" >&2
+    echo "  got: $subject" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# --allow-abort        : let empty messages abort the commit instead of failing.
+# --allowed-prefixes   : skip validation for git-generated messages.
+# --message-length-limit 72 : cap the subject line (Conventional Commits norm).
+exec cz check \
+  --commit-msg-file "$1" \
+  --allow-abort \
+  --allowed-prefixes "Merge" "Revert" "fixup!" "squash!" "amend!" \
+  --message-length-limit 72

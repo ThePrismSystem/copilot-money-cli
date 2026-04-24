@@ -14,7 +14,8 @@ TOTAL=$(printf '%s\n' "$OUT" | rg '^TOTAL' | tail -n 1)
 LINES_PCT=$(printf '%s\n' "$TOTAL" | rg -o '[0-9]+\.[0-9]+%' | tail -n 1)
 LINES_PCT=${LINES_PCT%%%}
 
-LINES_INT=$(python3 - <<PY
+LINES_INT=$(
+  python3 - <<PY
 v=float('$LINES_PCT')
 print(int(round(v)))
 PY

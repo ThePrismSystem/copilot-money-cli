@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -7,11 +8,17 @@ use graphql_parser::query::{
     TypeCondition, Value, VariableDefinition,
 };
 
+macro_rules! wl {
+    ($out:expr, $($arg:tt)*) => {
+        ::std::writeln!($out, $($arg)*).expect("write! to String is infallible")
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeRef {
     Named(String),
-    List(Box<TypeRef>),
-    NonNull(Box<TypeRef>),
+    List(Box<Self>),
+    NonNull(Box<Self>),
 }
 
 impl TypeRef {
@@ -181,20 +188,16 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
     out.push_str("# Generated stub schema (best-effort)\n");
     out.push_str("# Source docs:\n");
     for (p, _) in sources {
-        out.push_str(&format!("# - {}\n", p.display()));
+        wl!(out, "# - {}", p.display());
     }
     out.push('\n');
 
     for scalar in &draft.scalars {
-        out.push_str(&format!("scalar {scalar}\n"));
+        wl!(out, "scalar {scalar}");
     }
     out.push('\n');
 
-    let has_mutation = draft
-        .objects
-        .get("Mutation")
-        .map(|m| !m.is_empty())
-        .unwrap_or(false);
+    let has_mutation = draft.objects.get("Mutation").is_some_and(|m| !m.is_empty());
     if has_mutation {
         out.push_str("schema { query: Query mutation: Mutation }\n\n");
     } else {
@@ -203,7 +206,7 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
 
     for (union_name, members) in &draft.unions {
         let rhs = members.iter().cloned().collect::<Vec<_>>().join(" | ");
-        out.push_str(&format!("union {union_name} = {rhs}\n\n"));
+        wl!(out, "union {union_name} = {rhs}\n");
     }
 
     for (type_name, fields) in &draft.objects {
@@ -214,23 +217,20 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
             }
         }
 
-        out.push_str(&format!("type {type_name} {{\n"));
+        wl!(out, "type {type_name} {{");
         if fields.is_empty() {
             out.push_str("  _placeholder: JSON\n");
         } else {
             for (field_name, field) in fields {
                 let args = render_args(&field.args);
-                out.push_str(&format!(
-                    "  {field_name}{args}: {}\n",
-                    render_type_ref(&field.ty)
-                ));
+                wl!(out, "  {field_name}{args}: {}", render_type_ref(&field.ty));
             }
         }
         out.push_str("}\n\n");
     }
 
     for input_name in &draft.inputs {
-        out.push_str(&format!("input {input_name} {{\n  _stub: JSON\n}}\n\n"));
+        wl!(out, "input {input_name} {{\n  _stub: JSON\n}}\n");
     }
 
     out
@@ -276,8 +276,9 @@ fn collect_named_types_from_var_type(
             inputs.insert(name.clone());
             scalars.insert("JSON".to_string());
         }
-        Type::ListType(inner) => collect_named_types_from_var_type(inner, inputs, scalars),
-        Type::NonNullType(inner) => collect_named_types_from_var_type(inner, inputs, scalars),
+        Type::ListType(inner) | Type::NonNullType(inner) => {
+            collect_named_types_from_var_type(inner, inputs, scalars);
+        }
     }
 }
 
@@ -363,8 +364,7 @@ fn process_selection_set(
                 let ty = inline
                     .type_condition
                     .as_ref()
-                    .map(type_condition_name)
-                    .unwrap_or_else(|| current_type.to_string());
+                    .map_or_else(|| current_type.to_string(), type_condition_name);
                 process_selection_set(draft, &ty, &inline.selection_set, fragments, var_types);
             }
         }
@@ -519,10 +519,9 @@ fn infer_argument_type(
         Value::Int(_) => Some(TypeRef::named("Int")),
         Value::Float(_) => Some(TypeRef::named("Float")),
         Value::String(_) => Some(TypeRef::named("String")),
-        Value::Enum(_) => Some(TypeRef::named("JSON")),
-        Value::List(_) => Some(TypeRef::named("JSON")),
-        Value::Object(_) => Some(TypeRef::named("JSON")),
-        Value::Null => Some(TypeRef::named("JSON")),
+        Value::Enum(_) | Value::List(_) | Value::Object(_) | Value::Null => {
+            Some(TypeRef::named("JSON"))
+        }
     }
 }
 
@@ -536,10 +535,10 @@ mod tests {
         let p = tmp.path().join("a.graphql");
         fs::write(
             &p,
-            r#"
+            r"
 query Q { thing { ...ThingFields } }
 fragment ThingFields on Thing { id name }
-"#,
+",
         )
         .unwrap();
 
@@ -555,14 +554,14 @@ fragment ThingFields on Thing { id name }
         let q = tmp.path().join("q.graphql");
         std::fs::write(
             &q,
-            r#"query Q($first: Int!, $after: String) { transactions(first: $first, after: $after) { edges { node { id } } } }"#,
+            r"query Q($first: Int!, $after: String) { transactions(first: $first, after: $after) { edges { node { id } } } }",
         )
         .unwrap();
 
         let m = tmp.path().join("m.graphql");
         std::fs::write(
             &m,
-            r#"mutation M($id: ID!, $input: JSON) { deleteTag(id: $id) }"#,
+            r"mutation M($id: ID!, $input: JSON) { deleteTag(id: $id) }",
         )
         .unwrap();
 
@@ -579,7 +578,7 @@ fragment ThingFields on Thing { id name }
         let f = tmp.path().join("f.graphql");
         std::fs::write(
             &f,
-            r#"fragment IconFields on EmojiUnicode { __typename unicode }"#,
+            r"fragment IconFields on EmojiUnicode { __typename unicode }",
         )
         .unwrap();
 

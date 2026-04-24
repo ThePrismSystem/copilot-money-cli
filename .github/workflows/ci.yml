@@ -1,8 +1,8 @@
 name: ci
 
 on:
-  push:
   pull_request:
+    branches: [main]
 
 jobs:
   rust:
@@ -17,7 +17,50 @@ jobs:
       - name: test
         run: cargo test
       - name: clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: cargo check (MSRV)
+        run: cargo check --workspace --locked --all-targets
+
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.15.x"
+      - name: ruff check
+        run: ruff check tools/
+      - name: ruff format --check
+        run: ruff format --check tools/
+
+      - name: Install formatters
+        env:
+          SHFMT_VERSION: v3.13.1
+          TAPLO_VERSION: 0.10.0
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" \
+            -o "$HOME/.local/bin/shfmt"
+          curl -fsSL "https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-linux-x86_64.gz" \
+            | gunzip > "$HOME/.local/bin/taplo"
+          chmod +x "$HOME/.local/bin/shfmt" "$HOME/.local/bin/taplo"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: shfmt
+        run: shfmt -d -i 2 -ci scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+
+      - name: shellcheck
+        run: shellcheck -S style scripts/*.sh .githooks/pre-commit .githooks/commit-msg
+
+      - name: taplo fmt --check
+        run: taplo fmt --check
 
   gitleaks:
     runs-on: ubuntu-latest
@@ -26,8 +69,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
-        with:
-          args: --redact --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   coverage:
     runs-on: ubuntu-latest

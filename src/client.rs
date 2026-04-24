@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -11,6 +12,12 @@ use crate::types::{
     AccountId, CategoryId, ItemId, RecurringFrequency, RecurringId, TagId, TransactionId,
     TransactionType,
 };
+
+macro_rules! w {
+    ($out:expr, $($arg:tt)*) => {
+        ::std::write!($out, $($arg)*).expect("write! to String is infallible")
+    };
+}
 
 #[derive(Debug, Clone)]
 pub enum ClientMode {
@@ -29,18 +36,18 @@ pub struct CopilotClient {
 }
 
 impl CopilotClient {
-    pub fn new(mode: ClientMode) -> Self {
+    pub const fn new(mode: ClientMode) -> Self {
         Self { mode }
     }
 
     pub fn try_user_query(&self) -> anyhow::Result<()> {
-        let _ = self.graphql("User", ops::USER, json!({}))?;
+        let _ = self.graphql("User", ops::USER, &json!({}))?;
         Ok(())
     }
 
     pub fn try_user_query_without_refresh(&self) -> anyhow::Result<()> {
         let client = self.with_session_refresh_disabled();
-        let _ = client.graphql("User", ops::USER, json!({}))?;
+        let _ = client.graphql("User", ops::USER, &json!({}))?;
         Ok(())
     }
 
@@ -67,21 +74,24 @@ impl CopilotClient {
             .transactions)
     }
 
+    // `after` is consumed when embedded in the `json!` macro payload (clippy can't see
+    // through the macro expansion).
+    #[allow(clippy::needless_pass_by_value)]
     pub fn list_transactions_page(
         &self,
         first: usize,
         after: Option<String>,
-        filter: Option<Value>,
-        sort: Option<Value>,
+        filter: Option<&Value>,
+        sort: Option<&Value>,
     ) -> anyhow::Result<TransactionsPage> {
         let data = self.graphql(
             "Transactions",
             ops::TRANSACTIONS,
-            json!({
+            &json!({
                 "first": first,
                 "after": after,
-                "filter": filter,
-                "sort": sort,
+                "filter": filter.cloned(),
+                "sort": sort.cloned(),
             }),
         )?;
 
@@ -119,7 +129,7 @@ impl CopilotClient {
         let data = self.graphql(
             "Categories",
             ops::CATEGORIES,
-            json!({
+            &json!({
                 "spend": spend,
                 "budget": budget,
                 "rollovers": rollovers
@@ -140,7 +150,7 @@ impl CopilotClient {
     }
 
     pub fn list_recurrings(&self) -> anyhow::Result<Vec<Recurring>> {
-        let data = self.graphql("Recurrings", ops::RECURRINGS, json!({ "filter": null }))?;
+        let data = self.graphql("Recurrings", ops::RECURRINGS, &json!({ "filter": null }))?;
         let items = data
             .pointer("/data/recurrings")
             .and_then(|v| v.as_array())
@@ -155,7 +165,7 @@ impl CopilotClient {
     }
 
     pub fn list_tags(&self) -> anyhow::Result<Vec<Tag>> {
-        let data = self.graphql("Tags", ops::TAGS, json!({}))?;
+        let data = self.graphql("Tags", ops::TAGS, &json!({}))?;
         let items = data
             .pointer("/data/tags")
             .and_then(|v| v.as_array())
@@ -170,7 +180,7 @@ impl CopilotClient {
     }
 
     pub fn list_budget_months(&self) -> anyhow::Result<Vec<BudgetMonth>> {
-        let data = self.graphql("Budgets", ops::BUDGETS, json!({}))?;
+        let data = self.graphql("Budgets", ops::BUDGETS, &json!({}))?;
         let histories = data
             .pointer("/data/categoriesTotal/budget/histories")
             .and_then(|v| v.as_array())
@@ -185,8 +195,7 @@ impl CopilotClient {
                 .to_string();
             let amount = item
                 .get("amount")
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".into());
+                .map_or_else(|| "null".into(), std::string::ToString::to_string);
             out.push(BudgetMonth { month, amount });
         }
         Ok(out)
@@ -197,20 +206,22 @@ impl CopilotClient {
         ids: Vec<TransactionIdRef>,
         is_reviewed: bool,
     ) -> anyhow::Result<BulkEditTransactionsResult> {
-        self.bulk_edit_transactions(ids, json!({ "isReviewed": is_reviewed }))
+        self.bulk_edit_transactions(ids, &json!({ "isReviewed": is_reviewed }))
     }
 
+    // `ids` is consumed when embedded in the `json!` macro payload.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn bulk_edit_transactions(
         &self,
         ids: Vec<TransactionIdRef>,
-        input: Value,
+        input: &Value,
     ) -> anyhow::Result<BulkEditTransactionsResult> {
         let data = self.graphql(
             "BulkEditTransactions",
             ops::BULK_EDIT_TRANSACTIONS,
-            json!({
+            &json!({
                 "filter": { "ids": ids },
-                "input": input
+                "input": input.clone()
             }),
         )?;
 
@@ -250,16 +261,16 @@ impl CopilotClient {
         item_id: &ItemId,
         account_id: &AccountId,
         id: &TransactionId,
-        input: Value,
+        input: &Value,
     ) -> anyhow::Result<Transaction> {
         let data = self.graphql(
             "EditTransaction",
             ops::EDIT_TRANSACTION,
-            json!({
+            &json!({
                 "itemId": item_id.as_str(),
                 "accountId": account_id.as_str(),
                 "id": id.as_str(),
-                "input": input
+                "input": input.clone()
             }),
         )?;
 
@@ -280,7 +291,7 @@ impl CopilotClient {
         let data = self.graphql(
             "AddTransactionToRecurring",
             ops::ADD_TRANSACTION_TO_RECURRING,
-            json!({
+            &json!({
                 "itemId": item_id.as_str(),
                 "accountId": account_id.as_str(),
                 "id": id.as_str(),
@@ -310,7 +321,7 @@ impl CopilotClient {
         let data = self.graphql(
             "ExcludeTransactionFromRecurring",
             ops::EXCLUDE_TRANSACTION_FROM_RECURRING,
-            json!({
+            &json!({
                 "itemId": item_id.as_str(),
                 "accountId": account_id.as_str(),
                 "id": id.as_str(),
@@ -334,14 +345,14 @@ impl CopilotClient {
         let data = self.graphql(
             "DeleteTag",
             ops::DELETE_TAG,
-            json!({
+            &json!({
                 "id": id.as_str(),
             }),
         )?;
 
         let v = data
             .pointer("/data/deleteTag")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .ok_or_else(|| anyhow::anyhow!("unexpected DeleteTag response shape"))?;
         Ok(v)
     }
@@ -350,7 +361,7 @@ impl CopilotClient {
         let data = self.graphql(
             "CreateTag",
             ops::CREATE_TAG,
-            json!({
+            &json!({
                 "input": {
                     "name": name,
                     "colorName": color_name
@@ -367,15 +378,15 @@ impl CopilotClient {
 
     pub fn create_category(
         &self,
-        input: Value,
+        input: &Value,
         spend: bool,
         budget: bool,
     ) -> anyhow::Result<Category> {
         let data = self.graphql(
             "CreateCategory",
             ops::CREATE_CATEGORY,
-            json!({
-                "input": input,
+            &json!({
+                "input": input.clone(),
                 "spend": spend,
                 "budget": budget
             }),
@@ -398,7 +409,7 @@ impl CopilotClient {
         let data = self.graphql(
             "CreateRecurring",
             ops::CREATE_RECURRING,
-            json!({
+            &json!({
                 "input": {
                     "frequency": frequency,
                     "transaction": {
@@ -417,13 +428,13 @@ impl CopilotClient {
         Ok(serde_json::from_value(recurring)?)
     }
 
-    pub fn edit_recurring(&self, id: &RecurringId, input: Value) -> anyhow::Result<Recurring> {
+    pub fn edit_recurring(&self, id: &RecurringId, input: &Value) -> anyhow::Result<Recurring> {
         let data = self.graphql(
             "EditRecurring",
             ops::EDIT_RECURRING,
-            json!({
+            &json!({
                 "id": id.as_str(),
-                "input": input
+                "input": input.clone()
             }),
         )?;
 
@@ -438,7 +449,7 @@ impl CopilotClient {
         &self,
         operation_name: &str,
         query: &str,
-        variables: Value,
+        variables: &Value,
     ) -> anyhow::Result<Value> {
         match &self.mode {
             ClientMode::Fixtures(dir) => {
@@ -544,10 +555,10 @@ fn format_graphql_error(body: &Value) -> Option<String> {
     let mut out = String::new();
     out.push_str("graphql error");
     if let Some(c) = code {
-        out.push_str(&format!(" ({c})"));
+        w!(out, " ({c})");
     }
     if !message.is_empty() {
-        out.push_str(&format!(": {message}"));
+        w!(out, ": {message}");
     }
     Some(out)
 }
@@ -709,7 +720,7 @@ pub struct Category {
     pub color_name: Option<String>,
     pub icon: Option<Icon>,
     #[serde(rename = "childCategories")]
-    pub child_categories: Option<Vec<Category>>,
+    pub child_categories: Option<Vec<Self>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

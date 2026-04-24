@@ -7,6 +7,7 @@ use crate::types::CategoryId;
 use super::render::{KeyValueRow, TableRow, render_output, shorten_id_for_table};
 use super::{CategoriesCmd, Cli};
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_categories(
     cli: &Cli,
     client: &CopilotClient,
@@ -56,7 +57,7 @@ pub(super) fn run_categories(
                             value: c
                                 .parent_id
                                 .as_ref()
-                                .map(|p| p.to_string())
+                                .map(std::string::ToString::to_string)
                                 .unwrap_or_default(),
                         },
                         KeyValueRow {
@@ -88,7 +89,7 @@ pub(super) fn run_categories(
             }
 
             let want_budget = args.budget_unassigned_amount.is_some();
-            let cat = client.create_category(input, true, want_budget)?;
+            let cat = client.create_category(&input, true, want_budget)?;
 
             render_output(
                 cli,

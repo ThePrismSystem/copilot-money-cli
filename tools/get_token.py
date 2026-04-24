@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import html
 import json
@@ -15,6 +16,13 @@ from base64 import urlsafe_b64decode
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+# JWT `header.payload[.signature]` — we only require header+payload (signature
+# optional) since we never verify locally.
+_JWT_MIN_PARTS = 2  # minimum number of dot-separated segments (count of parts)
+_JWT_MIN_DOTS = 2  # minimum number of `.` characters in the raw token
+# Shortest plausible JWT — rejects stray strings that happen to start with "eyJ".
+_JWT_MIN_LENGTH = 200
 
 
 def trace(message: str) -> None:
@@ -80,13 +88,9 @@ def _reexec_under_xvfb_if_needed(mode: str, headful: bool) -> None:
     os.execvp(argv[0], argv)
 
 
-
-
-
-
 def decode_jwt_payload(token: str) -> dict | None:
     parts = token.strip().split(".")
-    if len(parts) < 2:
+    if len(parts) < _JWT_MIN_PARTS:
         return None
     payload = parts[1]
     payload += "=" * ((4 - (len(payload) % 4)) % 4)
@@ -152,12 +156,12 @@ def launch_browser_context(playwright, *, user_data_dir: str | None, headful: bo
         if not session_dir.exists():
             raise
         message = str(exc)
-        if ("ProcessSingleton" in message or "profile is already in use" in message) and _cleanup_stale_singleton_artifacts(session_dir):
+        if (
+            "ProcessSingleton" in message or "profile is already in use" in message
+        ) and _cleanup_stale_singleton_artifacts(session_dir):
             trace("retrying persistent browser session after removing stale singleton artifacts")
             return launch(str(session_dir))
-        trace(
-            f"persistent session launch failed without a recoverable singleton error; preserving {session_dir}"
-        )
+        trace(f"persistent session launch failed without a recoverable singleton error; preserving {session_dir}")
         raise
 
 
@@ -176,7 +180,7 @@ def prepare_user_data_dir(
 def _gmail_service():
     _reexec_into_integrations_venv_if_needed()
     sys.path.insert(0, str(Path.home() / ".codex" / "integrations"))
-    from mailcal.google.gmail import build_service  # type: ignore
+    from mailcal.google.gmail import build_service  # type: ignore[import-not-found]
 
     return build_service()
 
@@ -206,12 +210,12 @@ def extract_links(message: dict) -> list[str]:
         text = decode(part)
         if not text:
             continue
-        for url in re.findall(r'''href=["'](https?://[^"']+)["']''', text, flags=re.I):
-            url = html.unescape(url).strip().strip('"\'')
+        for raw_url in re.findall(r"""href=["'](https?://[^"']+)["']""", text, flags=re.IGNORECASE):
+            url = html.unescape(raw_url).strip().strip("\"'")
             if "copilot" in url or "/__/auth/action" in url:
                 candidates.append(url)
-        for url in re.findall(r'''https?://[^\s"<>)]{10,}''', text):
-            url = html.unescape(url).strip().strip('"\'')
+        for raw_url in re.findall(r"""https?://[^\s"<>)]{10,}""", text):
+            url = html.unescape(raw_url).strip().strip("\"'")
             if "copilot" in url or "/__/auth/action" in url:
                 candidates.append(url)
 
@@ -233,20 +237,10 @@ def wait_for_magic_link(*, timeout_seconds: int, email: str | None) -> str:
     target_query = f"to:{email} " if email else ""
     query = f"newer_than:1d {target_query}{sender_query}".strip()
     while time.time() < deadline:
-        resp = (
-            service.users()
-            .messages()
-            .list(userId="me", q=query, maxResults=5, includeSpamTrash=False)
-            .execute()
-        )
+        resp = service.users().messages().list(userId="me", q=query, maxResults=5, includeSpamTrash=False).execute()
         ids = [msg.get("id") for msg in (resp.get("messages") or []) if msg.get("id")]
         for message_id in ids:
-            message = (
-                service.users()
-                .messages()
-                .get(userId="me", id=message_id, format="full")
-                .execute()
-            )
+            message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
             internal_ms = int(message.get("internalDate") or 0)
             if internal_ms < start_ms:
                 continue
@@ -259,9 +253,7 @@ def wait_for_magic_link(*, timeout_seconds: int, email: str | None) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Log into Copilot Money and print the API bearer token (stdout)."
-    )
+    parser = argparse.ArgumentParser(description="Log into Copilot Money and print the API bearer token (stdout).")
     parser.add_argument(
         "--mode",
         choices=["interactive", "email-link", "credentials", "session"],
@@ -330,9 +322,9 @@ def main() -> int:
             auth = req.headers.get("authorization")
             if not auth:
                 return
-            parts = auth.split(" ", 1)
-            if len(parts) == 2 and parts[0].lower() == "bearer":
-                token = parts[1].strip()
+            scheme, _, raw = auth.partition(" ")
+            if scheme.lower() == "bearer" and raw:
+                token = raw.strip()
 
         page.on("request", on_request)
 
@@ -341,7 +333,7 @@ def main() -> int:
             locators = [
                 page.get_by_role("button", name="Continue with email"),
                 page.locator('button:has-text("Continue with email")'),
-                page.locator('text=Continue with email'),
+                page.locator("text=Continue with email"),
             ]
             for _ in range(40):
                 for loc in locators:
@@ -405,13 +397,11 @@ def main() -> int:
                 page.locator("button").first.click(force=True)
                 return
             except Exception:
-                raise SystemExit("could not click Continue")
+                raise SystemExit("could not click Continue") from None
 
         def request_email_link(addr: str) -> None:
-            try:
+            with contextlib.suppress(Exception):
                 click_continue_with_email()
-            except BaseException:
-                pass
             page.wait_for_timeout(250)
             fill_email_address(addr)
             click_continue()
@@ -433,10 +423,10 @@ def main() -> int:
                     raw = value.strip()
                     if raw.lower().startswith("bearer "):
                         raw = raw.split(" ", 1)[1].strip()
-                    if raw.startswith("eyJ") and raw.count(".") >= 2 and len(raw) > 200:
-                        return raw
-                    if "eyJ" in raw and raw.count(".") >= 2 and len(raw) > 200:
-                        match = re.search(r'''(eyJ[^\s"']{200,})''', raw)
+                    if "eyJ" in raw and raw.count(".") >= _JWT_MIN_DOTS and len(raw) > _JWT_MIN_LENGTH:
+                        if raw.startswith("eyJ"):
+                            return raw
+                        match = re.search(r"""(eyJ[^\s"']{200,})""", raw)
                         if match:
                             return match.group(1)
                 return None
@@ -473,12 +463,9 @@ def main() -> int:
             except Exception:
                 link = None
             if not link:
-                link = getpass.getpass(
-                    "Paste Copilot sign-in link URL from your email (input hidden): "
-                ).strip()
+                link = getpass.getpass("Paste Copilot sign-in link URL from your email (input hidden): ").strip()
                 if not link.startswith("http"):
                     print("invalid link", file=sys.stderr)
-                    browser.close()
                     return 2
             trace("opening magic link")
             page.goto(link, wait_until="domcontentloaded", timeout=60_000)

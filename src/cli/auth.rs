@@ -10,9 +10,14 @@ use crate::config::{
 use super::render::{KeyValueRow, render_output};
 use super::{AuthCmd, AuthLoginMode, Cli};
 
+// Dispatches every `copilot auth` subcommand — one match arm per variant, by design.
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_auth(cli: &Cli, client: &CopilotClient, cmd: AuthCmd) -> anyhow::Result<()> {
     match cmd {
         AuthCmd::Status => {
+            // Two branches do asymmetric work (env-lookup vs. file-load-and-tag); a
+            // `match` reads more naturally here than `Option::map_or_else`.
+            #[allow(clippy::single_match_else, clippy::option_if_let_else)]
             let token = match cli.token.clone() {
                 Some(t) => Some(("env".to_string(), t)),
                 None => {
@@ -32,9 +37,7 @@ pub(super) fn run_auth(cli: &Cli, client: &CopilotClient, cmd: AuthCmd) -> anyho
                 .map(|_| client.try_user_query_without_refresh().is_ok());
             rows.push(KeyValueRow {
                 key: "token_valid".to_string(),
-                value: valid
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unknown".to_string()),
+                value: valid.map_or_else(|| "unknown".to_string(), |v| v.to_string()),
             });
 
             render_output(cli, rows)
@@ -82,7 +85,7 @@ pub(super) fn run_auth(cli: &Cli, client: &CopilotClient, cmd: AuthCmd) -> anyho
                         });
                         cmd.args(["--secrets-file", p.to_string_lossy().as_ref()]);
                     }
-                };
+                }
 
                 match cmd.output() {
                     Ok(out) => {
