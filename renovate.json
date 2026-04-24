@@ -5,12 +5,9 @@
     ":semanticCommitTypeAll(chore)",
     ":dependencyDashboard"
   ],
-  "schedule": ["before 5am on monday"],
-  "timezone": "UTC",
   "rangeStrategy": "bump",
   "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": ["before 5am on monday"]
+    "enabled": true
   },
   "packageRules": [
     {
