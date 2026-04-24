@@ -21,7 +21,7 @@ print(int(round(v)))
 PY
 )
 
-BADGE="[![Coverage](https://img.shields.io/badge/coverage-${LINES_INT}%25-blue)](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/ci.yml)"
+BADGE="[![Coverage](https://img.shields.io/badge/coverage-${LINES_INT}%25-blue)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml)"
 
 python3 - <<PY
 from pathlib import Path

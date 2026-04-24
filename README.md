@@ -1,8 +1,7 @@
 # copilot-money-cli
 
-[![CI](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/ci.yml)
-[![Release](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/release.yml/badge.svg)](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/release.yml)
-[![Coverage](https://img.shields.io/badge/coverage-82%25-blue)](https://github.com/JaviSoto/copilot-money-cli/actions/workflows/ci.yml)
+[![CI](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-82%25-blue)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml)
 
 Unofficial CLI client for Copilot Money.
 
