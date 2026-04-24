@@ -54,6 +54,26 @@ class GetTokenTests(unittest.TestCase):
             "https://example.com/__/auth/action?mode=signIn&oobCode=abc&apiKey=123",
         )
 
+    def test_extract_links_rejects_spoofed_copilot_money_subdomain(self) -> None:
+        html = (
+            '<a href="https://app.copilot.money.attacker.example/login?x=1">legit?</a>'
+            '<a href="https://app.copilot.money/real">real</a>'
+        )
+        payload = {
+            "payload": {
+                "mimeType": "text/html",
+                "body": {"data": ""},
+                "parts": [
+                    {
+                        "mimeType": "text/html",
+                        "body": {"data": __import__("base64").urlsafe_b64encode(html.encode("utf-8")).decode("utf-8")},
+                    }
+                ],
+            }
+        }
+        links = get_token.extract_links(payload)
+        self.assertEqual(links, ["https://app.copilot.money/real"])
+
     def test_prepare_user_data_dir_creates_temp_profile_for_credentials_mode(self) -> None:
         profile_dir, temp_profile = get_token.prepare_user_data_dir("credentials", None)
 
