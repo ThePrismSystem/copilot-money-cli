@@ -155,11 +155,10 @@ def launch_browser_context(playwright, *, user_data_dir: str | None, headful: bo
         if ("ProcessSingleton" in message or "profile is already in use" in message) and _cleanup_stale_singleton_artifacts(session_dir):
             trace("retrying persistent browser session after removing stale singleton artifacts")
             return launch(str(session_dir))
-        backup = session_dir.with_name(f"{session_dir.name}.broken-{int(time.time())}")
-        trace(f"persistent session launch failed; moving {session_dir} to {backup}")
-        session_dir.rename(backup)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        return launch(str(session_dir))
+        trace(
+            f"persistent session launch failed without a recoverable singleton error; preserving {session_dir}"
+        )
+        raise
 
 
 def prepare_user_data_dir(

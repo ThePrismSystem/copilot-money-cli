@@ -118,6 +118,35 @@ class GetTokenTests(unittest.TestCase):
             self.assertFalse((default_dir / "LOCK").exists())
             self.assertEqual(list(profile.parent.glob(f"{profile.name}.broken-*")), [])
 
+    def test_launch_browser_context_does_not_quarantine_profile_on_non_singleton_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "playwright-session"
+            profile.mkdir(parents=True)
+            marker = profile / "Cookies"
+            marker.write_text("cookie-state", encoding="utf-8")
+
+            class _Chromium:
+                def launch(self, **kwargs):
+                    raise AssertionError("persistent profile path should be used")
+
+                def launch_persistent_context(self, dir_value, **kwargs):
+                    raise Exception("BrowserType.launch_persistent_context: sandbox init failed")
+
+            class _Playwright:
+                def __init__(self):
+                    self.chromium = _Chromium()
+
+            with self.assertRaisesRegex(Exception, "sandbox init failed"):
+                get_token.launch_browser_context(
+                    _Playwright(),
+                    user_data_dir=str(profile),
+                    headful=False,
+                )
+
+            self.assertTrue(profile.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "cookie-state")
+            self.assertEqual(list(profile.parent.glob(f"{profile.name}.broken-*")), [])
+
 
     def test_wait_for_magic_link_accepts_recent_message_before_poll_start(self) -> None:
         html = '<a href="https://auth.copilot.money/__/auth/action?mode=signIn&oobCode=abc">Magic link</a>'
