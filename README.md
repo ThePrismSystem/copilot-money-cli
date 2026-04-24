@@ -1,7 +1,7 @@
 # copilot-money-cli
 
-[![CI](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-82%25-blue)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml)
+[![CI](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThePrismSystem/copilot-money-cli/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/ThePrismSystem/copilot-money-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/ThePrismSystem/copilot-money-cli)
 
 Unofficial CLI client for Copilot Money.
 
@@ -136,7 +136,7 @@ Demos are generated from fixture responses under `tests/fixtures/graphql/`.
 ### Coverage
 
 - Summary: `cargo llvm-cov --workspace --summary-only`
-- Update README badge: `./scripts/update-coverage.sh`
+- Live coverage tracked at [codecov.io/gh/ThePrismSystem/copilot-money-cli](https://codecov.io/gh/ThePrismSystem/copilot-money-cli) (uploaded by CI on every push to `main`).
 
 ## Open source
 

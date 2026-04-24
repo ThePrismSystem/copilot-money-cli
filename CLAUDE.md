@@ -30,11 +30,10 @@ Tech stack: see Cargo.toml for the authoritative dependency list.
 | `cargo fmt --all -- --check` | Format check (CI + pre-commit) |
 | `cargo test` | Run all tests |
 | `cargo clippy --all-targets -- -D warnings` | Lint (CI + pre-commit) |
-| `cargo llvm-cov --workspace --summary-only` | Coverage summary |
+| `cargo llvm-cov --workspace --summary-only` | Coverage summary (live data published to Codecov by CI) |
 | `cargo build --release --locked --bin copilot` | Release build |
 | `cargo run --bin schema-gen -- --out schema/schema.graphql` | Regenerate schema stub |
 | `scripts/generate-demos.sh` | Regenerate `assets/demo.gif` from `demo/basic.tape` (needs `vhs`) |
-| `scripts/update-coverage.sh` | Update coverage badge in README |
 | `scripts/release.sh <version>` | Bump version, tag, push, publish to crates.io |
 | `scripts/setup-dev.sh` | Wire `.githooks/` as `core.hooksPath` |
 | `python3 tools/test_get_token.py` | Unit tests for the auth helper |
