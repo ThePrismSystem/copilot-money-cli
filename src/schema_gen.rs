@@ -8,6 +8,12 @@ use graphql_parser::query::{
     TypeCondition, Value, VariableDefinition,
 };
 
+macro_rules! wl {
+    ($out:expr, $($arg:tt)*) => {
+        ::std::writeln!($out, $($arg)*).expect("write! to String is infallible")
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeRef {
     Named(String),
@@ -182,12 +188,12 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
     out.push_str("# Generated stub schema (best-effort)\n");
     out.push_str("# Source docs:\n");
     for (p, _) in sources {
-        writeln!(out, "# - {}", p.display()).expect("write! to String is infallible");
+        wl!(out, "# - {}", p.display());
     }
     out.push('\n');
 
     for scalar in &draft.scalars {
-        writeln!(out, "scalar {scalar}").expect("write! to String is infallible");
+        wl!(out, "scalar {scalar}");
     }
     out.push('\n');
 
@@ -200,7 +206,7 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
 
     for (union_name, members) in &draft.unions {
         let rhs = members.iter().cloned().collect::<Vec<_>>().join(" | ");
-        writeln!(out, "union {union_name} = {rhs}\n").expect("write! to String is infallible");
+        wl!(out, "union {union_name} = {rhs}\n");
     }
 
     for (type_name, fields) in &draft.objects {
@@ -211,22 +217,20 @@ fn render_schema(draft: &SchemaDraft, sources: &[(PathBuf, String)]) -> String {
             }
         }
 
-        writeln!(out, "type {type_name} {{").expect("write! to String is infallible");
+        wl!(out, "type {type_name} {{");
         if fields.is_empty() {
             out.push_str("  _placeholder: JSON\n");
         } else {
             for (field_name, field) in fields {
                 let args = render_args(&field.args);
-                writeln!(out, "  {field_name}{args}: {}", render_type_ref(&field.ty))
-                    .expect("write! to String is infallible");
+                wl!(out, "  {field_name}{args}: {}", render_type_ref(&field.ty));
             }
         }
         out.push_str("}\n\n");
     }
 
     for input_name in &draft.inputs {
-        writeln!(out, "input {input_name} {{\n  _stub: JSON\n}}\n")
-            .expect("write! to String is infallible");
+        wl!(out, "input {input_name} {{\n  _stub: JSON\n}}\n");
     }
 
     out

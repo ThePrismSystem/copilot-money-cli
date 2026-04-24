@@ -69,14 +69,14 @@ opt-level = 3
 opt-level = 3
 
 [lints.rust]
-# unsafe_code is forbidden at crate roots in src/ so tests can still use unsafe blocks
-# (Rust 2024 made std::env::set_var unsafe; tests need it).
+# unsafe_code is forbidden via #![forbid(unsafe_code)] on each crate root (main.rs,
+# lib.rs, bin/schema_gen.rs). Per-file scoping (instead of a crate-wide lint) lets
+# tests still use unsafe blocks — Rust 2024 made std::env::set_var unsafe.
 unused_must_use = "deny"
 unused_imports = "deny"
 unused_variables = "deny"
 unreachable_pub = "warn"
 missing_debug_implementations = "warn"
-rust_2024_compatibility = { level = "warn", priority = -1 }
 
 [lints.clippy]
 # Group-level opt-ins (priority = -1 so specific allows below can override).
@@ -100,5 +100,4 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # `#[must_use]` on every builder-ish getter is noise for a CLI.
 must_use_candidate = "allow"
-# Large error enums are fine for an anyhow-based error path.
 result_large_err = "allow"

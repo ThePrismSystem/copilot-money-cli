@@ -15,13 +15,16 @@ use super::{AuthCmd, AuthLoginMode, Cli};
 pub(super) fn run_auth(cli: &Cli, client: &CopilotClient, cmd: AuthCmd) -> anyhow::Result<()> {
     match cmd {
         AuthCmd::Status => {
-            let token = cli.token.clone().map_or_else(
-                || {
+            // Two branches do asymmetric work (env-lookup vs. file-load-and-tag); a
+            // `match` reads more naturally here than `Option::map_or_else`.
+            #[allow(clippy::single_match_else, clippy::option_if_let_else)]
+            let token = match cli.token.clone() {
+                Some(t) => Some(("env".to_string(), t)),
+                None => {
                     let p = cli.token_file.clone().unwrap_or_else(token_path);
                     load_token(&p).ok().map(|t| ("file".to_string(), t))
-                },
-                |t| Some(("env".to_string(), t)),
-            );
+                }
+            };
 
             let mut rows = Vec::new();
             rows.push(KeyValueRow {

@@ -591,23 +591,15 @@ pub enum BudgetsCmd {
     Set,
 }
 
-// Takes `Cli` by value — `main` consumes it once and hands it off.
-#[allow(clippy::needless_pass_by_value)]
-pub fn run(cli: Cli) -> anyhow::Result<()> {
-    if matches!(&cli.command, Command::Version) {
-        println!("copilot-money-cli {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
+pub fn run(cli: &Cli) -> anyhow::Result<()> {
     let token_file_path = cli.token_file.clone().unwrap_or_else(token_path);
     let token = cli
         .token
         .clone()
         .or_else(|| load_token(&token_file_path).ok());
 
-    let mode = match &cli.fixtures_dir {
-        Some(dir) => ClientMode::Fixtures(dir.clone()),
-        None => ClientMode::Http {
+    let mode = cli.fixtures_dir.as_ref().map_or_else(
+        || ClientMode::Http {
             base_url: cli.base_url.clone(),
             token,
             token_file: token_file_path,
@@ -616,17 +608,21 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 .clone()
                 .or_else(|| session_path().exists().then_some(session_path())),
         },
-    };
+        |dir| ClientMode::Fixtures(dir.clone()),
+    );
     let client = CopilotClient::new(mode);
 
     match &cli.command {
-        Command::Auth { cmd } => auth::run_auth(&cli, &client, cmd.clone()),
-        Command::Transactions { cmd } => run_transactions(&cli, &client, cmd.clone()),
-        Command::Categories { cmd } => categories::run_categories(&cli, &client, cmd.clone()),
-        Command::Recurrings { cmd } => recurrings::run_recurrings(&cli, &client, cmd.clone()),
-        Command::Tags { cmd } => tags::run_tags(&cli, &client, cmd.clone()),
-        Command::Budgets { cmd } => budgets::run_budgets(&cli, &client, cmd),
-        Command::Version => unreachable!(),
+        Command::Auth { cmd } => auth::run_auth(cli, &client, cmd.clone()),
+        Command::Transactions { cmd } => run_transactions(cli, &client, cmd.clone()),
+        Command::Categories { cmd } => categories::run_categories(cli, &client, cmd.clone()),
+        Command::Recurrings { cmd } => recurrings::run_recurrings(cli, &client, cmd.clone()),
+        Command::Tags { cmd } => tags::run_tags(cli, &client, cmd.clone()),
+        Command::Budgets { cmd } => budgets::run_budgets(cli, &client, cmd),
+        Command::Version => {
+            println!("copilot-money-cli {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
 }
 
@@ -659,24 +655,11 @@ fn value_to_money_string(v: Option<serde_json::Value>) -> String {
     let negative = trimmed.starts_with('-');
     let numeric = trimmed.trim_start_matches('-');
 
-    numeric.parse::<f64>().map_or_else(
-        |_| {
-            // Fallback: keep original, but prefix `$` if it looks like a number.
-            if negative {
-                format!("-${numeric}")
-            } else {
-                format!("${trimmed}")
-            }
-        },
-        |n| {
-            let formatted = format!("{:.2}", n.abs());
-            if negative {
-                format!("-${formatted}")
-            } else {
-                format!("${formatted}")
-            }
-        },
-    )
+    let magnitude = numeric
+        .parse::<f64>()
+        .map_or_else(|_| numeric.to_string(), |n| format!("{:.2}", n.abs()));
+    let sign = if negative { "-" } else { "" };
+    format!("{sign}${magnitude}")
 }
 
 fn normalize_date(s: &str) -> Option<String> {
@@ -816,8 +799,8 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                 args.after.clone(),
                 args.pages,
                 args.all,
-                filter,
-                sort,
+                filter.as_ref(),
+                sort.as_ref(),
             )?;
             let filtered = filter_transactions(
                 items,
@@ -848,8 +831,8 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                 args.after.clone(),
                 args.pages,
                 args.all,
-                filter,
-                sort,
+                filter.as_ref(),
+                sort.as_ref(),
             )?;
             let filtered = filter_transactions(
                 items,
@@ -957,7 +940,7 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                     &item_id,
                     &account_id,
                     &txn.id,
-                    serde_json::json!({ "categoryId": category_id.clone() }),
+                    &serde_json::json!({ "categoryId": category_id.clone() }),
                 )?;
                 updated.push(t);
             }
@@ -1061,7 +1044,7 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                 } else {
                     serde_json::json!({ "userNotes": args.notes.clone().unwrap_or_default() })
                 };
-                let t = client.edit_transaction(&item_id, &account_id, &txn.id, input)?;
+                let t = client.edit_transaction(&item_id, &account_id, &txn.id, &input)?;
                 updated.push(t);
             }
             render_transactions_updated(cli, updated)
@@ -1120,7 +1103,7 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
                     &item_id,
                     &account_id,
                     &txn.id,
-                    serde_json::json!({
+                    &serde_json::json!({
                         "tagIds": next_ids
                             .into_iter()
                             .map(|id| id.to_string())
@@ -1165,7 +1148,7 @@ fn run_transactions(cli: &Cli, client: &CopilotClient, cmd: TransactionsCmd) -> 
             let mut updated = Vec::new();
             for txn in txns {
                 let (item_id, account_id) = require_item_and_account(&txn)?;
-                let t = client.edit_transaction(&item_id, &account_id, &txn.id, input.clone())?;
+                let t = client.edit_transaction(&item_id, &account_id, &txn.id, &input)?;
                 updated.push(t);
             }
             render_transactions_updated(cli, updated)
@@ -1310,17 +1293,14 @@ struct TransactionsJsonOutput {
     page_info: Option<PageInfo>,
 }
 
-// `filter` / `sort` are owned so they can be `.clone()`d on each pagination call
-// without requiring callers to hold the values past the call.
-#[allow(clippy::needless_pass_by_value)]
 fn fetch_transactions_with_filter_sort(
     client: &CopilotClient,
     page_size: usize,
     after: Option<String>,
     pages: usize,
     all: bool,
-    filter: Option<serde_json::Value>,
-    sort: Option<serde_json::Value>,
+    filter: Option<&serde_json::Value>,
+    sort: Option<&serde_json::Value>,
 ) -> anyhow::Result<(Vec<Transaction>, PageInfo)> {
     let mut out = Vec::new();
     let mut cursor = after;
@@ -1329,12 +1309,7 @@ fn fetch_transactions_with_filter_sort(
     let mut last_page_info: Option<PageInfo> = None;
 
     for _ in 0..max_pages {
-        let page = client.list_transactions_page(
-            page_size,
-            cursor.clone(),
-            filter.clone(),
-            sort.clone(),
-        )?;
+        let page = client.list_transactions_page(page_size, cursor.clone(), filter, sort)?;
         cursor.clone_from(&page.page_info.end_cursor);
         last_page_info = Some(page.page_info);
         out.extend(page.transactions);

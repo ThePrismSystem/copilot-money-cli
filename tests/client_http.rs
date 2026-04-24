@@ -355,7 +355,7 @@ fn http_mode_bulk_edit_sends_arbitrary_input() {
                 account_id: AccountId::from("acct_1"),
                 id: TransactionId::from("txn_1"),
             }],
-            serde_json::json!({ "recurringId": serde_json::Value::Null }),
+            &serde_json::json!({ "recurringId": serde_json::Value::Null }),
         )
         .unwrap();
 }

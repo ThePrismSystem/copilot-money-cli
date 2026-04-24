@@ -184,7 +184,7 @@ pub(super) fn run_recurrings(
                 input.insert("rule".to_string(), serde_json::Value::Object(rule));
             }
 
-            let recurring = client.edit_recurring(&args.id, serde_json::Value::Object(input))?;
+            let recurring = client.edit_recurring(&args.id, &serde_json::Value::Object(input))?;
             render_output(
                 cli,
                 vec![

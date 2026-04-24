@@ -89,7 +89,7 @@ pub(super) fn run_categories(
             }
 
             let want_budget = args.budget_unassigned_amount.is_some();
-            let cat = client.create_category(input, true, want_budget)?;
+            let cat = client.create_category(&input, true, want_budget)?;
 
             render_output(
                 cli,

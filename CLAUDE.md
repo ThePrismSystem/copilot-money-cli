@@ -6,7 +6,7 @@ Unofficial Rust CLI (`copilot`) that talks to Copilot Money's GraphQL API at `ht
 
 - `src/main.rs` — binary entrypoint (calls `cli::run`)
 - `src/lib.rs` — module wiring
-- `src/cli/` — clap definitions + command dispatch (`mod.rs` is the top-level Cli struct + `run_transactions`; per-domain files: `auth.rs`, `categories.rs`, `recurrings.rs`, `tags.rs`, `budgets.rs`, `render.rs`)
+- `src/cli/` — clap definitions + command dispatch; top-level `Cli` struct + `run_transactions` in `mod.rs`, one file per command group (`auth`, `categories`, `recurrings`, `tags`, `budgets`, `render`)
 - `src/client.rs` — `CopilotClient` with `Http` and `Fixtures` modes; all GraphQL calls go through `graphql()`
 - `src/ops.rs` — `include_str!` constants mapping each operation name to its `.graphql` document
 - `src/types.rs` — newtype IDs (`TransactionId`, `CategoryId`, etc.) + enums
@@ -16,11 +16,11 @@ Unofficial Rust CLI (`copilot`) that talks to Copilot Money's GraphQL API at `ht
 - `schema/schema.graphql` — best-effort schema stub
 - `tests/` — `cli.rs` (behavior), `cli_snapshots.rs` + `tests/snapshots/` (insta), `client_http.rs` (mock server), `config.rs`, `tests/fixtures/graphql/*.json` (per-operation fixtures)
 - `tools/` — Python helpers: `get_token.py` (Playwright auth), `test_get_token.py`, `capture_graphql_ops.py`
-- `scripts/` — `release.sh`, `generate-demos.sh`, `update-coverage.sh`, `setup-dev.sh`
-- `.githooks/` — repo hooks; activated by `scripts/setup-dev.sh` setting `core.hooksPath=.githooks`. `pre-commit` (fmt/test/clippy/gitleaks) is tracked; `commit-msg` (commitizen-based Conventional Commits check) is tracked; `pre-push` (fork-safety — blocks pushes to upstream) is local-only (see below)
-- `.github/workflows/` — `ci.yml` (fmt/test/clippy/gitleaks/coverage), `release.yml` (tag-driven)
+- `scripts/` — release, demos, coverage, dev-setup helpers
+- `.githooks/` — repo hooks; activated by `scripts/setup-dev.sh` setting `core.hooksPath=.githooks`. `pre-commit` (fmt/test/clippy/ruff/shfmt/shellcheck/taplo/gitleaks) is tracked; `commit-msg` (commitizen-based Conventional Commits check, with regex fallback) is tracked; `pre-push` (fork-safety — blocks pushes to upstream) is local-only (see below)
+- `.github/workflows/` — `ci.yml` (fmt/test/clippy/style/gitleaks/coverage/msrv), `release.yml` (tag-driven)
 
-Tech stack: Rust 2024 edition · clap (derive) · reqwest (blocking + rustls) · serde/serde_json · comfy-table · rpassword · insta (snapshots).
+Tech stack: see Cargo.toml for the authoritative dependency list.
 
 <important if="you need to run commands to build, test, lint, or generate code">
 
@@ -29,7 +29,7 @@ Tech stack: Rust 2024 edition · clap (derive) · reqwest (blocking + rustls) ·
 | `cargo fmt --all` | Format |
 | `cargo fmt --all -- --check` | Format check (CI + pre-commit) |
 | `cargo test` | Run all tests |
-| `cargo clippy -- -D warnings` | Lint (CI + pre-commit) |
+| `cargo clippy --all-targets -- -D warnings` | Lint (CI + pre-commit) |
 | `cargo llvm-cov --workspace --summary-only` | Coverage summary |
 | `cargo build --release --locked --bin copilot` | Release build |
 | `cargo run --bin schema-gen -- --out schema/schema.graphql` | Regenerate schema stub |

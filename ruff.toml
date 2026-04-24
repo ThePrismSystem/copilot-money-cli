@@ -6,51 +6,12 @@ line-length = 120
 src = ["tools"]
 
 [format]
-# Match ruff's defaults (double quotes, space indent, trailing comma in multi-line).
+# Match ruff's defaults.
 quote-style = "double"
 
 [lint]
-# Select every category, then justify each ignore below.
-select = ["ALL"]
-
-ignore = [
-  # Docstrings — these are CLI helper scripts, not a library API.
-  "D100",
-  "D101",
-  "D102",
-  "D103",
-  "D104",
-  "D105",
-  "D106",
-  "D107",
-  "D203",
-  "D212",
-  # Type annotations — partial hints are acceptable for scripts; not requiring full coverage.
-  "ANN001",
-  "ANN002",
-  "ANN003",
-  "ANN201",
-  "ANN202",
-  "ANN204",
-  "ANN205",
-  "ANN206",
-  "ANN401",
-  # `print` is fine — this is a CLI helper that emits status on stderr.
-  "T201",
-  # unittest style is already used here; pytest-style assertions not required.
-  "PT009",
-  "PT027",
-  # Missing `__init__.py` — tools/ isn't a package, it's standalone scripts.
-  "INP001",
-  # Low-value stylistic rules.
-  "EM101",
-  "EM102",  # raw/f-string in exception
-  "TRY003", # raise-vanilla-args (noisy for anyhow-style messages)
-  "COM812", # trailing comma (ruff format handles this)
-  # Boolean positional arg is a conscious choice for the helper's CLI interface.
-  "FBT001",
-  "FBT002",
-]
+# Explicit enable-list; new ruff releases won't spontaneously enable rules.
+select = ["E", "W", "F", "I", "B", "UP", "RUF", "S", "SIM", "PL"]
 
 [lint.per-file-ignores]
 # Helper scripts use fall-through exception handling around browser automation
@@ -74,10 +35,5 @@ ignore = [
 "tools/test_*.py" = [
   "S101",    # assert usage
   "PLR2004", # magic values in tests
-  "SLF001",  # private-member access (we test internals)
-  "ARG002",  # mock method signatures match the real thing; unused args intentional
   "SIM117",  # deeply-nested `with` blocks for mocks
 ]
-
-[lint.pydocstyle]
-convention = "google"

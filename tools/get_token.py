@@ -19,7 +19,8 @@ from playwright.sync_api import sync_playwright
 
 # JWT `header.payload[.signature]` — we only require header+payload (signature
 # optional) since we never verify locally.
-_JWT_MIN_PARTS = 2
+_JWT_MIN_PARTS = 2  # minimum number of dot-separated segments (count of parts)
+_JWT_MIN_DOTS = 2  # minimum number of `.` characters in the raw token
 # Shortest plausible JWT — rejects stray strings that happen to start with "eyJ".
 _JWT_MIN_LENGTH = 200
 
@@ -399,7 +400,7 @@ def main() -> int:
                 raise SystemExit("could not click Continue") from None
 
         def request_email_link(addr: str) -> None:
-            with contextlib.suppress(BaseException):
+            with contextlib.suppress(Exception):
                 click_continue_with_email()
             page.wait_for_timeout(250)
             fill_email_address(addr)
@@ -422,9 +423,9 @@ def main() -> int:
                     raw = value.strip()
                     if raw.lower().startswith("bearer "):
                         raw = raw.split(" ", 1)[1].strip()
-                    if raw.startswith("eyJ") and raw.count(".") >= _JWT_MIN_PARTS and len(raw) > _JWT_MIN_LENGTH:
-                        return raw
-                    if "eyJ" in raw and raw.count(".") >= _JWT_MIN_PARTS and len(raw) > _JWT_MIN_LENGTH:
+                    if "eyJ" in raw and raw.count(".") >= _JWT_MIN_DOTS and len(raw) > _JWT_MIN_LENGTH:
+                        if raw.startswith("eyJ"):
+                            return raw
                         match = re.search(r"""(eyJ[^\s"']{200,})""", raw)
                         if match:
                             return match.group(1)

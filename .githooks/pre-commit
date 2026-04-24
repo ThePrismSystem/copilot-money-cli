@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s nullglob
+
+check_tool() {
+  if command -v "$1" >/dev/null 2>&1; then return 0; fi
+  echo "warning: $1 not found; skipping $2" >&2
+  [ -n "${3:-}" ] && echo "  install: $3" >&2
+  return 1
+}
 
 if command -v cargo >/dev/null 2>&1; then
   cargo fmt --all -- --check
@@ -8,39 +16,25 @@ if command -v cargo >/dev/null 2>&1; then
 fi
 
 # Python: lint + format check.
-if command -v ruff >/dev/null 2>&1; then
+if check_tool ruff "Python lint/format checks" "uv tool install ruff"; then
   ruff check tools/
   ruff format --check tools/
-else
-  echo "warning: ruff not found; skipping Python lint/format checks" >&2
-  echo "  install: uv tool install ruff" >&2
 fi
 
 # Shell: format + static analysis.
-if command -v shfmt >/dev/null 2>&1; then
+if check_tool shfmt "shell format check" "go install mvdan.cc/sh/v3/cmd/shfmt@latest"; then
   shfmt -d -i 2 -ci scripts/*.sh .githooks/pre-commit .githooks/commit-msg
-else
-  echo "warning: shfmt not found; skipping shell format check" >&2
-  echo "  install: go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2
 fi
 
-if command -v shellcheck >/dev/null 2>&1; then
+if check_tool shellcheck "shell static analysis" "see https://github.com/koalaman/shellcheck#installing"; then
   shellcheck -S style scripts/*.sh .githooks/pre-commit .githooks/commit-msg
-else
-  echo "warning: shellcheck not found; skipping shell static analysis" >&2
-  echo "  install: see https://github.com/koalaman/shellcheck#installing" >&2
 fi
 
 # TOML: format check.
-if command -v taplo >/dev/null 2>&1; then
+if check_tool taplo "TOML format check" "cargo install taplo-cli --locked"; then
   taplo fmt --check
-else
-  echo "warning: taplo not found; skipping TOML format check" >&2
-  echo "  install: curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz | gunzip > ~/.local/bin/taplo && chmod +x ~/.local/bin/taplo" >&2
 fi
 
-if command -v gitleaks >/dev/null 2>&1; then
+if check_tool gitleaks "local secret scan" ""; then
   gitleaks protect --staged --redact --verbose
-else
-  echo "warning: gitleaks not found; skipping local secret scan" >&2
 fi
